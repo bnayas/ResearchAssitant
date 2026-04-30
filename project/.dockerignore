@@ -1,0 +1,15 @@
+.git
+.gitignore
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.ipynb
+dist
+build
+simulations
+orch_output
+ising_output
+*.log

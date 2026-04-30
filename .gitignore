@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual environments
+.venv/
+project/.venv/
+
+# Frontend build/runtime artifacts
+project/frontend/node_modules/
+project/frontend/dist/
+
+# Generated runtime outputs
+programs/
+project/programs/
+writer_jobs/
+
+# Packaged/exported artifacts
+research_platform.zip

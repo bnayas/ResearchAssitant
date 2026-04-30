@@ -1,0 +1,589 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+from literature_review.article_parser import ArticleParser
+from literature_review.contract import LiteratureReviewTask, ScopeConstraint, SearchDepthConfig
+from literature_review.search_backends.arxiv_backend import ArXivBackend
+from literature_review.search_backends.semantic_scholar_backend import SemanticScholarBackend
+
+from ..article_lookup import article_query_candidates, build_article_lookup_query
+from ..contracts import ArtifactRef, AssistantId, TaskEnvelope
+from ..registry import ArtifactRegistry
+from .backends import build_literature_review_bridge_from_env
+from .errors import AssistantExecutionError
+from .utils import jsonify, truncate
+
+
+class LocalLiteratureAssistant:
+    def __init__(self, registry: ArtifactRegistry, llm_backend: Any) -> None:
+        self._registry = registry
+        self._llm = llm_backend
+
+    def prepare_article_lookup_spec(self, task: TaskEnvelope) -> dict[str, Any]:
+        fallback = self._fallback_lookup_spec(task)
+        try:
+            response = self._llm.complete(
+                system=(
+                    "You prepare structured article lookup requests for academic search backends.\n"
+                    "Return ONLY a raw JSON object. Do not use markdown.\n"
+                    "Extract specific search constraints from the directive.\n"
+                    "Important usage rules:\n"
+                    "- query_terms are broad free-text retrieval terms sent to search backends.\n"
+                    "- required_authors are post-retrieval constraints and should usually NOT appear in query_terms.\n"
+                    "- preferred_year, year_min, and year_max are post-retrieval time constraints and should usually NOT appear in query_terms.\n"
+                    "- title_phrases should contain only literal title fragments if the directive clearly implies them; otherwise use an empty list.\n"
+                    "- Do not invent title phrases.\n"
+                    "- Focus query_terms on topic phrases that are likely to appear in the paper title or abstract.\n"
+                    "- If the request is materially underspecified and you need one professor answer before searching well, set needs_clarification to true and ask one concise question.\n"
+                    "- Example: if no publication year or search window is given and the topic spans many years, ask whether to search all years or constrain the time window."
+                ),
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Directive instruction:\n{task.instructions}\n\n"
+                            f"Topic hint:\n{task.metadata.get('topic_hint', '')}\n\n"
+                            f"Steering notes:\n{self._steering_text(task)}\n\n"
+                            "Return a JSON object with exactly these keys:\n"
+                            "{\n"
+                            '  "query_terms": ["<topic term or phrase used for retrieval>"],\n'
+                            '  "required_authors": ["<surname>"],\n'
+                            '  "preferred_year": 2017,\n'
+                            '  "year_min": 2000,\n'
+                            '  "year_max": 2020,\n'
+                            '  "title_phrases": ["<literal title fragment if clearly implied>"],\n'
+                            '  "query_string": "<compact comma-separated form of query_terms only>",\n'
+                            '  "needs_clarification": false,\n'
+                            '  "clarification_question": ""\n'
+                            "}\n"
+                            "Use null for preferred_year/year_min/year_max if unspecified."
+                        ),
+                    }
+                ],
+                temperature=0.0,
+            )
+        except Exception:
+            return fallback
+        return self._coerce_lookup_spec(response, fallback=fallback)
+
+    def prepare_article_lookup_query(self, task: TaskEnvelope) -> str:
+        return self.prepare_article_lookup_spec(task)["query_string"]
+
+    def find_primary_article(self, task: TaskEnvelope) -> ArtifactRef:
+        parser = ArticleParser(
+            ArXivBackend(sort_by="relevance"),
+            fallback_backends=[SemanticScholarBackend()],
+        )
+        lookup_spec = self._lookup_spec_from_task(task)
+        preferred_query = str(lookup_spec.get("query_string") or "")
+        attempted_queries = self._lookup_query_candidates(
+            lookup_spec,
+            task,
+        )
+
+        paper = None
+        selected_query = preferred_query
+        for candidate in attempted_queries:
+            candidate_spec = dict(lookup_spec)
+            candidate_spec["query_string"] = candidate
+            candidate_spec["query_terms"] = [
+                part.strip() for part in candidate.split(",") if part.strip()
+            ]
+            paper = parser.find_article(candidate, lookup_spec=candidate_spec)
+            if paper is not None:
+                selected_query = candidate
+                break
+            diagnostics = getattr(parser, "last_search_diagnostics", {})
+            if diagnostics.get("all_rate_limited"):
+                attempted_backends = ", ".join(diagnostics.get("attempted_backends") or []) or "the configured backends"
+                raise AssistantExecutionError(
+                    "Primary article lookup is temporarily rate-limited across all configured backends. "
+                    "The workflow stopped retrying to avoid flooding them.\n"
+                    f"Backends in cooldown: {attempted_backends}"
+                )
+
+        if paper is None:
+            attempted = "\n- ".join(attempted_queries) if attempted_queries else "(no query prepared)"
+            raise AssistantExecutionError(
+                "Could not find any article matching the prepared article lookup query.\n"
+                f"Attempted queries:\n- {attempted}"
+            )
+        payload = {
+            "title": paper.title,
+            "authors": paper.authors,
+            "abstract": paper.abstract,
+            "url": paper.url,
+            "year": paper.year,
+            "arxiv_id": paper.arxiv_id,
+            "doi": paper.doi,
+            "source": paper.source,
+            "short_id": paper.short_id,
+            "lookup_query": selected_query,
+            "lookup_spec": {
+                **lookup_spec,
+                "query_string": selected_query,
+            },
+        }
+        return self._registry.save_json(
+            assistant=AssistantId.LITERATURE_REVIEWER.value,
+            kind="primary_article",
+            title="Primary Article Match",
+            filename="article/article_match.json",
+            payload=payload,
+            summary=f"{paper.title} ({paper.year or '?'})",
+            metadata=payload,
+            artifact_id="article-match",
+        )
+
+    def build_article_brief(self, task: TaskEnvelope, article: ArtifactRef) -> ArtifactRef:
+        parser = ArticleParser(ArXivBackend())
+        arxiv_id = str(article.metadata.get("arxiv_id") or "")
+        abstract = str(article.metadata.get("abstract") or "")
+        paper_url = str(article.metadata.get("url") or "")
+        text = parser.fetch_full_text(arxiv_id, fallback_abstract=abstract, paper_url=paper_url)
+        guidance = "\n".join(
+            str(item).strip()
+            for item in (task.metadata.get("steering_notes") or [])
+            if str(item).strip()
+        )
+        questions = [
+            "What is the detailed description of the primary simulation model (equations, dynamics)? If there are multiple distinct models, list them and state 'MULTIPLE_MODELS'.",
+            "What are the key parameters and their values? Provide a JSON object mapping parameter names to values.",
+            "What is the step-by-step simulation algorithm procedure (e.g., Gillespie, Euler)?",
+            "What are the expected figures?",
+        ]
+        answers = parser.extract_answers(text, questions, self._llm, guidance=guidance)
+        model_description = self._normalize_answer(
+            answers.get(questions[0], ""),
+            fallback=self._fallback_model_description(article, text),
+        )
+        params = self._coerce_parameters(
+            answers.get(questions[1], ""),
+            text=text,
+        )
+        procedure = self._normalize_answer(
+            answers.get(questions[2], ""),
+            fallback="Monte Carlo simulation reported in the article; use the paper's stated update and competition rules.",
+        )
+        expected_figures = self._coerce_figures(
+            answers.get(questions[3], ""),
+            fallback=[
+                "Species abundance distribution under environmental stochasticity",
+                "Representative reproduction figure from the article",
+            ],
+        )
+        payload = {
+            "article_artifact_id": article.artifact_id,
+            "article_title": article.metadata.get("title", ""),
+            "model_description": model_description,
+            "key_parameters": params,
+            "procedure": procedure,
+            "expected_figures": expected_figures,
+        }
+        summary_md = (
+            f"# Article Brief\n\n"
+            f"## Model\n{model_description}\n\n"
+            f"## Procedure\n{procedure}\n\n"
+            f"## Key Parameters\n"
+            + "\n".join(f"- **{key}**: {value}" for key, value in params.items())
+            + "\n\n## Expected Figures\n"
+            + "\n".join(f"- {item}" for item in expected_figures)
+        )
+        self._registry.save_text(
+            assistant=AssistantId.LITERATURE_REVIEWER.value,
+            kind="article_brief_markdown",
+            title="Article Brief",
+            filename="article/article_brief.md",
+            text=summary_md,
+            summary=truncate(summary_md),
+            metadata=payload,
+            artifact_id="article-brief-md",
+        )
+        return self._registry.save_json(
+            assistant=AssistantId.LITERATURE_REVIEWER.value,
+            kind="article_brief",
+            title="Article Brief",
+            filename="article/article_brief.json",
+            payload=payload,
+            summary=truncate(model_description),
+            metadata=payload,
+            artifact_id="article-brief",
+        )
+
+    def review_related_literature(
+        self,
+        task: TaskEnvelope,
+        article: ArtifactRef,
+        brief: ArtifactRef,
+    ) -> ArtifactRef:
+        bridge = build_literature_review_bridge_from_env(llm_sync_backend=self._llm)
+        query = str(brief.metadata.get("model_description") or article.metadata.get("title") or task.instructions)
+        include_topics = [
+            topic.strip()
+            for topic in str(task.metadata.get("topic_hint") or "").split(",")
+            if topic.strip()
+        ]
+        if not include_topics:
+            include_topics = [query]
+        review_task = LiteratureReviewTask(
+            task_id=f"{task.task_id}-lit",
+            branch_id=task.directive_id,
+            query=self._with_steering_note(query, task),
+            scope=ScopeConstraint(
+                include_topics=include_topics,
+                year_min=task.metadata.get("year_min"),
+                year_max=task.metadata.get("year_max"),
+                max_papers=int(task.metadata.get("max_papers", 5)),
+            ),
+            depth=SearchDepthConfig(
+                max_rounds=int(task.metadata.get("max_rounds", 2)),
+                max_term_variations=int(task.metadata.get("max_term_variations", 1)),
+                min_papers_threshold=int(task.metadata.get("min_papers_threshold", 2)),
+                papers_per_query=int(task.metadata.get("papers_per_query", 5)),
+            ),
+            requestor_agent=AssistantId.ORCHESTRATOR.value,
+        )
+        result = bridge.run_sync(review_task)
+        artifact_payload = {
+            "artifact": jsonify(result.artifact),
+            "audit": jsonify(result.audit),
+        }
+        synthesis = result.artifact.synthesis
+        self._registry.save_text(
+            assistant=AssistantId.LITERATURE_REVIEWER.value,
+            kind="literature_synthesis_markdown",
+            title="Literature Synthesis",
+            filename="literature/literature_synthesis.md",
+            text=f"# Literature Synthesis\n\n{synthesis}\n",
+            summary=truncate(synthesis),
+            metadata={
+                "accepted_count": result.artifact.accepted_count,
+                "audit_passed": result.audit.passed,
+            },
+            artifact_id="literature-synthesis-md",
+        )
+        return self._registry.save_json(
+            assistant=AssistantId.LITERATURE_REVIEWER.value,
+            kind="literature_review",
+            title="Related Literature Review",
+            filename="literature/literature_review.json",
+            payload=artifact_payload,
+            summary=f"{result.artifact.accepted_count} accepted paper(s)",
+            metadata={
+                "accepted_count": result.artifact.accepted_count,
+                "removed_count": result.artifact.removed_count,
+                "status": result.artifact.status,
+                "audit_passed": result.audit.passed,
+                "synthesis": synthesis,
+            },
+            artifact_id="literature-review",
+        )
+
+    @staticmethod
+    def _with_steering_note(query: str, task: TaskEnvelope) -> str:
+        notes = [
+            str(item).strip()
+            for item in (task.metadata.get("steering_notes") or [])
+            if str(item).strip()
+        ]
+        if not notes:
+            return query
+        return f"{query}\n\nPI steering notes:\n" + "\n".join(f"- {note}" for note in notes)
+
+    @staticmethod
+    def _steering_text(task: TaskEnvelope) -> str:
+        notes = [
+            str(item).strip()
+            for item in (task.metadata.get("steering_notes") or [])
+            if str(item).strip()
+        ]
+        if not notes:
+            return "(none)"
+        return "\n".join(f"- {note}" for note in notes)
+
+    @staticmethod
+    def _coerce_lookup_query(response: str, *, fallback: str) -> str:
+        text = str(response or "").strip()
+        if not text:
+            return fallback
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        if text.startswith("{"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                value = payload.get("query") or payload.get("lookup_query") or payload.get("search_query")
+                if isinstance(value, list):
+                    value = ", ".join(str(item).strip() for item in value if str(item).strip())
+                if isinstance(value, str) and value.strip():
+                    text = value.strip()
+
+        text = re.sub(r"^(?:query|lookup query|search query)\s*:\s*", "", text, flags=re.IGNORECASE)
+        parts = [
+            re.sub(r"\s+", " ", part.strip(" -•\t"))
+            for part in re.split(r"[,\n;]+", text)
+            if part.strip(" -•\t")
+        ]
+        if not parts:
+            return fallback
+        if len(parts) == 1 and len(parts[0].split()) > 8:
+            return fallback
+        return ", ".join(parts[:8])
+
+    def _lookup_spec_from_task(self, task: TaskEnvelope) -> dict[str, Any]:
+        raw = task.metadata.get("article_lookup_spec")
+        if isinstance(raw, dict):
+            return self._normalize_lookup_spec(raw, fallback=self._fallback_lookup_spec(task))
+        query = str(task.metadata.get("article_lookup_query") or "").strip()
+        if query:
+            spec = self._fallback_lookup_spec(task)
+            spec["query_string"] = query
+            spec["query_terms"] = [part.strip() for part in query.split(",") if part.strip()]
+            return spec
+        return self._fallback_lookup_spec(task)
+
+    def _lookup_query_candidates(self, lookup_spec: dict[str, Any], task: TaskEnvelope) -> list[str]:
+        title_phrases = [str(item).strip() for item in lookup_spec.get("title_phrases", []) if str(item).strip()]
+        preferred_year = lookup_spec.get("preferred_year")
+        year_token = str(preferred_year).strip() if preferred_year is not None else ""
+        focused_title_query = ", ".join([*title_phrases[:1], year_token]).strip(", ")
+        fallback_query = build_article_lookup_query("", task.instructions)
+        return article_query_candidates(
+            str(lookup_spec.get("query_string") or ""),
+            focused_title_query,
+            str(task.metadata.get("topic_hint") or ""),
+            fallback_query,
+        )
+
+    def _fallback_lookup_spec(self, task: TaskEnvelope) -> dict[str, Any]:
+        query_string = build_article_lookup_query(
+            str(task.metadata.get("topic_hint") or ""),
+            task.instructions,
+        )
+        combined_text = f"{task.instructions}\n{self._steering_text(task)}"
+        required_authors = self._extract_author_surnames(combined_text)
+        preferred_year = self._extract_preferred_year(combined_text)
+        return self._normalize_lookup_spec(
+            {
+                "query_string": query_string,
+                "query_terms": [part.strip() for part in query_string.split(",") if part.strip()],
+                "required_authors": required_authors,
+                "preferred_year": preferred_year,
+                "year_min": None,
+                "year_max": None,
+                "title_phrases": [],
+                "needs_clarification": False,
+                "clarification_question": "",
+            },
+            fallback={
+                "query_string": query_string,
+                "query_terms": [part.strip() for part in query_string.split(",") if part.strip()],
+                "required_authors": required_authors,
+                "preferred_year": preferred_year,
+                "year_min": None,
+                "year_max": None,
+                "title_phrases": [],
+                "needs_clarification": False,
+                "clarification_question": "",
+            },
+        )
+
+    @staticmethod
+    def _normalize_lookup_spec(spec: dict[str, Any], *, fallback: dict[str, Any]) -> dict[str, Any]:
+        query_terms = [
+            str(item).strip()
+            for item in (spec.get("query_terms") or [])
+            if str(item).strip()
+        ]
+        query_string = str(spec.get("query_string") or "").strip()
+        if not query_terms and query_string:
+            query_terms = [part.strip() for part in query_string.split(",") if part.strip()]
+
+        required_authors = [
+            str(item).strip()
+            for item in (spec.get("required_authors") or [])
+            if str(item).strip()
+        ]
+        if not required_authors:
+            required_authors = list(fallback.get("required_authors") or [])
+
+        preferred_year = spec.get("preferred_year")
+        try:
+            preferred_year = int(preferred_year) if preferred_year is not None else None
+        except (TypeError, ValueError):
+            preferred_year = fallback.get("preferred_year")
+
+        year_min = spec.get("year_min")
+        try:
+            year_min = int(year_min) if year_min is not None else None
+        except (TypeError, ValueError):
+            year_min = fallback.get("year_min")
+
+        year_max = spec.get("year_max")
+        try:
+            year_max = int(year_max) if year_max is not None else None
+        except (TypeError, ValueError):
+            year_max = fallback.get("year_max")
+
+        if preferred_year is not None:
+            year_min = preferred_year if year_min is None else year_min
+            year_max = preferred_year if year_max is None else year_max
+
+        title_phrases = [
+            str(item).strip()
+            for item in (spec.get("title_phrases") or [])
+            if str(item).strip()
+        ]
+
+        needs_clarification = bool(spec.get("needs_clarification"))
+        clarification_question = str(spec.get("clarification_question") or "").strip()
+
+        author_tokens = {item.lower() for item in required_authors}
+        filtered_terms = [
+            term for term in query_terms
+            if term.lower() not in author_tokens
+            and (preferred_year is None or term != str(preferred_year))
+            and (year_min is None or term != str(year_min))
+            and (year_max is None or term != str(year_max))
+        ]
+        query_terms = filtered_terms
+        if not query_terms and title_phrases:
+            query_terms = list(title_phrases)
+        if not query_terms:
+            query_terms = [
+                str(item).strip()
+                for item in (fallback.get("query_terms") or [])
+                if str(item).strip() and str(item).strip().lower() not in author_tokens
+            ]
+        if not query_terms and query_string:
+            query_terms = [part.strip() for part in query_string.split(",") if part.strip()]
+
+        query_string = ", ".join(query_terms[:8])
+
+        return {
+            "query_string": query_string,
+            "query_terms": query_terms[:8],
+            "required_authors": required_authors[:4],
+            "preferred_year": preferred_year,
+            "year_min": year_min,
+            "year_max": year_max,
+            "title_phrases": title_phrases[:3],
+            "needs_clarification": needs_clarification and bool(clarification_question),
+            "clarification_question": clarification_question,
+        }
+
+    def _coerce_lookup_spec(self, response: str, *, fallback: dict[str, Any]) -> dict[str, Any]:
+        text = str(response or "").strip()
+        if not text:
+            return fallback
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if not isinstance(payload, dict):
+            return fallback
+        if not payload.get("query_string"):
+            query_terms = [
+                str(item).strip()
+                for item in (payload.get("query_terms") or [])
+                if str(item).strip()
+            ]
+            if query_terms:
+                payload["query_string"] = ", ".join(query_terms[:8])
+            else:
+                payload["query_string"] = self._coerce_lookup_query(text, fallback=fallback["query_string"])
+        return self._normalize_lookup_spec(payload, fallback=fallback)
+
+    @staticmethod
+    def _extract_author_surnames(text: str) -> list[str]:
+        values: list[str] = []
+        for match in re.finditer(r"\b([A-Z][A-Za-z'`.-]{2,})\s+(?:and|&)\s+([A-Z][A-Za-z'`.-]{2,})\b", text):
+            values.extend([match.group(1), match.group(2)])
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(value)
+        return result
+
+    @staticmethod
+    def _extract_preferred_year(text: str) -> int | None:
+        matches = re.findall(r"\b(19\d{2}|20\d{2})\b", str(text or ""))
+        if not matches:
+            return None
+        try:
+            return int(matches[0])
+        except ValueError:
+            return None
+
+    def _fallback_model_description(self, article: ArtifactRef, text: str) -> str:
+        abstract = str(article.metadata.get("abstract") or "").strip()
+        title = str(article.metadata.get("title") or "").strip()
+        source = abstract or text[:1200].strip() or title
+        if not source:
+            return "Neutral model reproduction target from the selected article."
+        return source
+
+    @staticmethod
+    def _normalize_answer(answer: str, *, fallback: str) -> str:
+        normalized = (answer or "").strip()
+        if not normalized or normalized.upper() == "NOT_FOUND":
+            return fallback.strip()
+        return normalized
+
+    @staticmethod
+    def _coerce_parameters(raw: Any, *, text: str) -> dict[str, str]:
+        if isinstance(raw, dict):
+            return {str(key): str(value) for key, value in raw.items()}
+        candidate = (raw or "").strip()
+        if candidate and candidate.upper() != "NOT_FOUND":
+            try:
+                if candidate.startswith("{"):
+                    data = json.loads(candidate)
+                    return {str(key): str(value) for key, value in data.items()}
+            except json.JSONDecodeError:
+                pass
+            return {"parameters": candidate}
+
+        found: dict[str, str] = {}
+        for key, value in re.findall(r"\b([A-Za-z][A-Za-z0-9_\-]{0,20})\s*=\s*([0-9.eE+\-]+)", text):
+            if key.lower() in {"http", "https"}:
+                continue
+            found.setdefault(key, value)
+        if found:
+            return found
+        return {"parameters": "Use the parameter values reported in the article text."}
+
+    @staticmethod
+    def _coerce_figures(raw: str, *, fallback: list[str]) -> list[str]:
+        text = (raw or "").strip()
+        if not text or text.upper() == "NOT_FOUND":
+            return fallback
+        if text.startswith("["):
+            try:
+                data = json.loads(text)
+                return [str(item) for item in data if str(item).strip()]
+            except json.JSONDecodeError:
+                pass
+        return [item.strip(" -") for item in re.split(r"[\n;]+", text) if item.strip()]

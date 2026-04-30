@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research-assistant-workspace"
+version = "0.1.0"
+description = "Workspace wrapper for the Research Platform repository"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["project"]
+
+[tool.pytest.ini_options]
+testpaths = ["project/tests"]
+pythonpath = ["project"]

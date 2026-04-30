@@ -1,0 +1,9 @@
+{
+  "directive_id": "danino-repro-001",
+  "pi_name": "Prof. Shnerb",
+  "instruction": "Find the Danino Shnerb 2017 paper on time-averaged neutral dynamics and reproduce their simulation",
+  "topic_hint": "time-averaged neutral dynamics, environmental stochasticity, Danino, Shnerb",
+  "phases": ["find_article", "parse_article", "literature", "simulation", "write"],
+  "output_dir": "./programs/danino-repro-001",
+  "llm": {"provider": "lmstudio", "base_url": "http://localhost:1234/v1", "model": "auto", "timeout_seconds": 120.0}
+}
