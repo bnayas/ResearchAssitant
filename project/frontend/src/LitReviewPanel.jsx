@@ -74,7 +74,7 @@ function PaperCard({ paper, idx }) {
   );
 }
 
-export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange }) {
+export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, onAttachToDesk }) {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [includeTopics, setIncludeTopics] = useState("");
   const [excludeTopics, setExcludeTopics] = useState("");
@@ -83,11 +83,41 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange })
   const [maxPapers, setMaxPapers] = useState("12");
   const [maxRounds, setMaxRounds] = useState("3");
 
+  // Load from localStorage if available
   const [useArxiv, setUseArxiv]   = useState(true);
-  const [useSSch, setUseSSch]     = useState(false);  // disabled by default — needs API key to avoid rate-limits
+  const [useSSch, setUseSSch]     = useState(false);
   const [usePerplexity, setUsePerplexity] = useState(false);
   const [ssApiKey, setSsApiKey]   = useState("");
   const [pplxKey, setPplxKey]     = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("literatureAgentConfig");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.arxiv !== undefined) setUseArxiv(parsed.arxiv.enabled);
+        if (parsed.semantic_scholar !== undefined) {
+          setUseSSch(parsed.semantic_scholar.enabled);
+          if (parsed.semantic_scholar.api_key) setSsApiKey(parsed.semantic_scholar.api_key);
+        }
+        if (parsed.perplexity !== undefined) {
+          setUsePerplexity(parsed.perplexity.enabled);
+          if (parsed.perplexity.api_key) setPplxKey(parsed.perplexity.api_key);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load literatureAgentConfig from localStorage", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    const config = {
+      arxiv: { enabled: useArxiv },
+      semantic_scholar: { enabled: useSSch, api_key: ssApiKey || null },
+      perplexity: { enabled: usePerplexity, api_key: pplxKey || null },
+    };
+    localStorage.setItem("literatureAgentConfig", JSON.stringify(config));
+  }, [useArxiv, useSSch, usePerplexity, ssApiKey, pplxKey]);
 
   const [llm, setLlm] = useState({
     provider: globalLLM?.provider || "lmstudio",
@@ -241,7 +271,10 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange })
           {showConfig ? "▼ HIDE CONFIG" : "▲ SHOW CONFIG"}
         </button>
         {result && (
-          <button className="btn btn-violet" onClick={handleExport}>⬇ EXPORT .MD</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn-violet" onClick={handleExport}>⬇ EXPORT .MD</button>
+            <button className="btn btn-violet" onClick={() => onAttachToDesk?.(synthesis, papers)}>➕ ATTACH TO DESK</button>
+          </div>
         )}
         <button
           className={`btn ${running ? "" : "btn-violet"}`}

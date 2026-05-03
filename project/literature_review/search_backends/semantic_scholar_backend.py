@@ -51,7 +51,11 @@ class SemanticScholarBackend(SearchBackend):
                  Falls back to SS_API_KEY env var if not given.
         """
         key = api_key or os.getenv("SS_API_KEY")
-        self._headers = {"x-api-key": key} if key else {}
+        self._headers = {
+            "User-Agent": "ResearchAssistant/1.0 (mailto:admin@example.com)"
+        }
+        if key:
+            self._headers["x-api-key"] = key
         self._last_rate_limited = False
         # Be conservative in the unauthenticated shared pool and stay below the
         # nominal 100-requests-per-5-minutes ceiling.
@@ -64,6 +68,7 @@ class SemanticScholarBackend(SearchBackend):
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         categories: Optional[list[str]] = None,   # Not supported; ignored
+        authors: Optional[list[str]] = None,
     ) -> list[RawPaper]:
         self._last_rate_limited = False
         if self._in_cooldown():
@@ -76,7 +81,10 @@ class SemanticScholarBackend(SearchBackend):
             log.warning("SemanticScholarBackend requires aiohttp for live search requests")
             return []
 
-        query = " ".join(keywords)
+        query_parts = list(keywords)
+        if authors:
+            query_parts.extend(authors)
+        query = " ".join(query_parts)
         params: dict = {
             "query": query,
             "fields": _FIELDS,
@@ -92,7 +100,7 @@ class SemanticScholarBackend(SearchBackend):
             async with aiohttp.ClientSession(
                 headers=self._headers, timeout=aiohttp.ClientTimeout(total=20)
             ) as session:
-                async with session.get(SS_API, params=params) as resp:
+                async with session.get(SS_API, params=params, allow_redirects=True) as resp:
                     if resp.status == 429:
                         self._mark_rate_limited(resp.headers.get("Retry-After"))
                         return []

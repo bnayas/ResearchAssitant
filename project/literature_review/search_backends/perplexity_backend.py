@@ -67,6 +67,7 @@ class PerplexityBackend(SearchBackend):
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         categories: Optional[list[str]] = None,   # Folded into prompt
+        authors: Optional[list[str]] = None,
     ) -> list[RawPaper]:
         try:
             import aiohttp
@@ -74,7 +75,7 @@ class PerplexityBackend(SearchBackend):
             log.warning("PerplexityBackend requires aiohttp for live search requests")
             return []
 
-        user_msg = self._build_prompt(keywords, max_results, year_min, year_max, categories)
+        user_msg = self._build_prompt(keywords, max_results, year_min, year_max, categories, authors)
         payload = {
             "model": self.model,
             "messages": [
@@ -117,8 +118,11 @@ class PerplexityBackend(SearchBackend):
         year_min: Optional[int],
         year_max: Optional[int],
         categories: Optional[list[str]],
+        authors: Optional[list[str]],
     ) -> str:
         parts = [f"Find up to {max_results} academic papers about: {', '.join(keywords)}."]
+        if authors:
+            parts.append(f"Must be authored by: {', '.join(authors)}.")
         if year_min or year_max:
             lo = year_min or "any year"
             hi = year_max or "present"

@@ -22,6 +22,7 @@ class AgentRuntimeProfile:
     max_tokens: int = 4096
     tool_allowlist: list[str] = field(default_factory=list)
     mcp_servers: list[str] = field(default_factory=list)
+    plugin_config: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
 
     def to_backend_kwargs(self) -> dict[str, Any]:

@@ -440,15 +440,26 @@ def _format_spec_card(spec: SimulationSpec) -> str:
 
 
 def _parse_json(raw: str) -> Optional[dict]:
+    clean_resp = raw.strip()
+    if clean_resp.startswith("```json"):
+        clean_resp = clean_resp[7:]
+    elif clean_resp.startswith("```"):
+        clean_resp = clean_resp[3:]
+    if clean_resp.endswith("```"):
+        clean_resp = clean_resp[:-3]
+    clean_resp = clean_resp.strip()
+
     try:
-        return json.loads(raw)
+        return json.loads(clean_resp)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        m = re.search(r"\{.*\}", clean_resp, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                log.warning("JSON decode failed on extracted block: %s. Raw was: %r", e, raw[:500])
+        else:
+            log.warning("No JSON object could be extracted. Raw was: %r", raw[:500])
     return None
 
 

@@ -75,6 +75,7 @@ class ArticleParser:
                     max_results=5,
                     year_min=year_min,
                     year_max=year_max,
+                    authors=normalized_spec.get("required_authors"),
                 )
                 if getattr(backend, "_last_rate_limited", False):
                     rate_limited_backends.append(backend_name)

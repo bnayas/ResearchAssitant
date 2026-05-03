@@ -54,6 +54,7 @@ class ArXivBackend(SearchBackend):
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         categories: Optional[list[str]] = None,
+        authors: Optional[list[str]] = None,
     ) -> list[RawPaper]:
         self._last_rate_limited = False
         if self._in_cooldown():
@@ -62,8 +63,8 @@ class ArXivBackend(SearchBackend):
             return []
         # Try strict AND query first, fall back to OR if it returns nothing
         for query in [
-            self._build_query(keywords, categories),              # strict: all AND
-            self._build_or_query(keywords, categories),          # loose:  any OR
+            self._build_query(keywords, categories, authors),              # strict: all AND
+            self._build_or_query(keywords, categories, authors),          # loose:  any OR
         ]:
             result = await self._fetch_with_retry(query, max_results)
             if self._last_rate_limited:
@@ -83,19 +84,22 @@ class ArXivBackend(SearchBackend):
             for attempt in range(2):
                 try:
                     await self._respect_pacing()
+                    log.info("ArXiv request URL: %s, params: %s", ARXIV_API, params)
                     async with aiohttp.ClientSession(
-                        timeout=aiohttp.ClientTimeout(total=25)
+                        timeout=aiohttp.ClientTimeout(total=25),
+                        headers={"User-Agent": "ResearchAssistant/1.0 (mailto:admin@example.com)"}
                     ) as session:
-                        async with session.get(ARXIV_API, params=params) as resp:
+                        async with session.get(ARXIV_API, params=params, allow_redirects=True) as resp:
                             if resp.status == 429:
                                 self._mark_rate_limited(resp.headers.get("Retry-After"))
                                 return ""
-                            resp.raise_for_status()
+                            if resp.status >= 400:
+                                text = await resp.text()
+                                log.warning("ArXiv HTTP %d error: %s", resp.status, text)
+                                resp.raise_for_status()
                             return await resp.text()
-                except aiohttp.ClientResponseError:
-                    raise
                 except Exception as exc:
-                    log.warning("ArXiv aiohttp attempt %d failed: %s", attempt + 1, exc)
+                    log.warning("ArXiv aiohttp attempt %d failed: %r", attempt + 1, exc, exc_info=True)
                     if attempt < 1:
                         await asyncio.sleep(3)
         except ImportError:
@@ -104,9 +108,13 @@ class ArXivBackend(SearchBackend):
         # --- urllib fallback (no external dep) ---
         import urllib.request, urllib.parse
         url = ARXIV_API + "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "ResearchAssistant/1.0 (mailto:admin@example.com)"}
+        )
         try:
             await self._respect_pacing()
-            with urllib.request.urlopen(url, timeout=25) as r:
+            with urllib.request.urlopen(req, timeout=25) as r:
                 return r.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             if getattr(exc, "code", None) == 429:
@@ -123,13 +131,15 @@ class ArXivBackend(SearchBackend):
     # ──────────────────────────────────────────────
 
     def _build_query(
-        self, keywords: list[str], categories: Optional[list[str]]
+        self, keywords: list[str], categories: Optional[list[str]], authors: Optional[list[str]] = None
     ) -> str:
         """
         Strict AND query: all terms must appear.
         Example: all:"time-averaged neutral" AND all:"environmental stochasticity"
         """
         kw_parts = [f'all:"{kw}"' for kw in keywords]
+        if authors:
+            kw_parts.extend([f'au:"{author}"' for author in authors])
         query = " AND ".join(kw_parts)
         if categories:
             cat_part = " OR ".join(f"cat:{c}" for c in categories)
@@ -137,7 +147,7 @@ class ArXivBackend(SearchBackend):
         return query
 
     def _build_or_query(
-        self, keywords: list[str], categories: Optional[list[str]]
+        self, keywords: list[str], categories: Optional[list[str]], authors: Optional[list[str]] = None
     ) -> str:
         """
         Loose OR query: any term matches.
@@ -145,6 +155,10 @@ class ArXivBackend(SearchBackend):
         """
         kw_parts = [f'all:"{kw}"' for kw in keywords]
         query = " OR ".join(kw_parts)
+        if authors:
+            # We still want to strictly require the authors even in an OR query fallback for keywords
+            author_part = " AND ".join([f'au:"{author}"' for author in authors])
+            query = f"({query}) AND ({author_part})"
         if categories:
             cat_part = " OR ".join(f"cat:{c}" for c in categories)
             query = f"({query}) AND ({cat_part})"

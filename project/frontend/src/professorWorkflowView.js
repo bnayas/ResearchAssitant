@@ -24,6 +24,51 @@ export function getAwaitingSteering(email) {
   return steering;
 }
 
+export function buildAnswerFields(steering) {
+  const schema = steering?.expected_schema || steering?.request?.expected_schema || {};
+  const answers = schema.answers;
+  const promptLabels = numberedPromptLabels(steering?.prompt || steering?.request?.question || "");
+  if (answers && typeof answers === "object" && !Array.isArray(answers)) {
+    return Object.keys(answers).map((key) => ({
+      key,
+      label: promptLabels[key] || (key === "clarification" ? "Response" : key === "selection" ? "Selection" : `Answer ${key}`),
+      multiline: true,
+    }));
+  }
+  return [{ key: "response", label: "Response", multiline: true }];
+}
+
+function numberedPromptLabels(prompt) {
+  const labels = {};
+  String(prompt || "").split(/\n+/).forEach((line) => {
+    const match = line.trim().match(/^(\d+)[.)]\s+(.+)$/);
+    if (match) labels[match[1]] = match[2].trim();
+  });
+  return labels;
+}
+
+export function initialAnswersForSteering(steering) {
+  return Object.fromEntries(buildAnswerFields(steering).map((field) => [field.key, ""]));
+}
+
+export function hasAnswerValues(answers) {
+  return Object.values(answers || {}).some((value) => String(value || "").trim());
+}
+
+export function buildQuestionResponsePayload(steering, answers) {
+  const cleaned = {};
+  Object.entries(answers || {}).forEach(([key, value]) => {
+    const text = String(value || "").trim();
+    if (text) cleaned[key] = text;
+  });
+  return {
+    checkpointId: steering?.checkpoint_id || steering?.request_id || "",
+    sessionId: steering?.session_id || steering?.request?.resume_token || null,
+    action: "answer",
+    payload: { answers: cleaned },
+  };
+}
+
 export function parseJsonAttachment(attachment) {
   if (!attachment?.content || attachment?.mime_type !== "application/json") return null;
   try {

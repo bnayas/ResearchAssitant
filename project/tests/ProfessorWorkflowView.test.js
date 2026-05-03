@@ -1,8 +1,12 @@
 import {
   attachmentHref,
+  buildAnswerFields,
+  buildQuestionResponsePayload,
   buildWriterArtifactCatalog,
   buildWriterArtifactContext,
   getAwaitingSteering,
+  hasAnswerValues,
+  initialAnswersForSteering,
 } from "../frontend/src/professorWorkflowView.js";
 
 let passed = 0;
@@ -73,6 +77,41 @@ test("getAwaitingSteering extracts pending steering metadata", () => {
     },
   });
   assertEqual(steering.checkpoint_id, "dir-1:find_article");
+});
+
+test("buildAnswerFields reflects generic agent request schemas", () => {
+  const fields = buildAnswerFields({
+    kind: "agent_request",
+    expected_schema: { answers: { selection: "string", rationale: "string" } },
+  });
+  assertEqual(fields.length, 2);
+  assertEqual(fields[0].key, "selection");
+  assertEqual(fields[0].label, "Selection");
+});
+
+test("buildAnswerFields labels numbered questions from prompt text", () => {
+  const fields = buildAnswerFields({
+    kind: "agent_request",
+    prompt: "1. Which range should be swept?\n2. Which stopping rule should be used?",
+    expected_schema: { answers: { "1": "string", "2": "string" } },
+  });
+  assertEqual(fields[0].label, "Which range should be swept?");
+  assertEqual(fields[1].label, "Which stopping rule should be used?");
+});
+
+test("buildQuestionResponsePayload wires answers to the waiting session", () => {
+  const steering = {
+    checkpoint_id: "req-1",
+    session_id: "session-1",
+    expected_schema: { answers: { clarification: "string" } },
+  };
+  const answers = initialAnswersForSteering(steering);
+  answers.clarification = "Use a narrower publication window.";
+  assert(hasAnswerValues(answers), "answers should be non-empty");
+  const payload = buildQuestionResponsePayload(steering, answers);
+  assertEqual(payload.sessionId, "session-1");
+  assertEqual(payload.action, "answer");
+  assertEqual(payload.payload.answers.clarification, "Use a narrower publication window.");
 });
 
 test("buildWriterArtifactCatalog includes literature and simulation sources", () => {

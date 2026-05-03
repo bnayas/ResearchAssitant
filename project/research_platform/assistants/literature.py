@@ -67,7 +67,10 @@ class LocalLiteratureAssistant:
             )
         except Exception:
             return fallback
-        return self._coerce_lookup_spec(response, fallback=fallback)
+        return self._with_lookup_clarification_if_needed(
+            self._coerce_lookup_spec(response, fallback=fallback),
+            task,
+        )
 
     def prepare_article_lookup_query(self, task: TaskEnvelope) -> str:
         return self.prepare_article_lookup_spec(task)["query_string"]
@@ -151,6 +154,10 @@ class LocalLiteratureAssistant:
         )
         questions = [
             "What is the detailed description of the primary simulation model (equations, dynamics)? If there are multiple distinct models, list them and state 'MULTIPLE_MODELS'.",
+            (
+                "List the distinct simulation targets or model variants that can be reproduced from this article. "
+                "Return a JSON array of objects with name and description fields. Return [] if there is only one target."
+            ),
             "What are the key parameters and their values? Provide a JSON object mapping parameter names to values.",
             "What is the step-by-step simulation algorithm procedure (e.g., Gillespie, Euler)?",
             "What are the expected figures?",
@@ -161,24 +168,29 @@ class LocalLiteratureAssistant:
             fallback=self._fallback_model_description(article, text),
         )
         params = self._coerce_parameters(
-            answers.get(questions[1], ""),
+            answers.get(questions[2], ""),
             text=text,
         )
         procedure = self._normalize_answer(
-            answers.get(questions[2], ""),
-            fallback="Monte Carlo simulation reported in the article; use the paper's stated update and competition rules.",
+            answers.get(questions[3], ""),
+            fallback="Use the simulation procedure reported in the article.",
         )
         expected_figures = self._coerce_figures(
-            answers.get(questions[3], ""),
+            answers.get(questions[4], ""),
             fallback=[
-                "Species abundance distribution under environmental stochasticity",
-                "Representative reproduction figure from the article",
+                "Primary reproduction figure from the article",
+                "Diagnostic comparison between reproduced and reported results",
             ],
+        )
+        simulation_targets = self._coerce_simulation_targets(
+            answers.get(questions[1], ""),
+            model_description=model_description,
         )
         payload = {
             "article_artifact_id": article.artifact_id,
             "article_title": article.metadata.get("title", ""),
             "model_description": model_description,
+            "simulation_targets": simulation_targets,
             "key_parameters": params,
             "procedure": procedure,
             "expected_figures": expected_figures,
@@ -186,6 +198,12 @@ class LocalLiteratureAssistant:
         summary_md = (
             f"# Article Brief\n\n"
             f"## Model\n{model_description}\n\n"
+            f"## Simulation Targets\n"
+            + "\n".join(
+                f"- **{target.get('name', 'Target')}**: {target.get('description', '')}"
+                for target in simulation_targets
+            )
+            + "\n\n"
             f"## Procedure\n{procedure}\n\n"
             f"## Key Parameters\n"
             + "\n".join(f"- **{key}**: {value}" for key, value in params.items())
@@ -328,6 +346,8 @@ class LocalLiteratureAssistant:
                     value = ", ".join(str(item).strip() for item in value if str(item).strip())
                 if isinstance(value, str) and value.strip():
                     text = value.strip()
+                else:
+                    return fallback
 
         text = re.sub(r"^(?:query|lookup query|search query)\s*:\s*", "", text, flags=re.IGNORECASE)
         parts = [
@@ -374,7 +394,7 @@ class LocalLiteratureAssistant:
         combined_text = f"{task.instructions}\n{self._steering_text(task)}"
         required_authors = self._extract_author_surnames(combined_text)
         preferred_year = self._extract_preferred_year(combined_text)
-        return self._normalize_lookup_spec(
+        spec = self._normalize_lookup_spec(
             {
                 "query_string": query_string,
                 "query_terms": [part.strip() for part in query_string.split(",") if part.strip()],
@@ -398,6 +418,7 @@ class LocalLiteratureAssistant:
                 "clarification_question": "",
             },
         )
+        return self._with_lookup_clarification_if_needed(spec, task)
 
     @staticmethod
     def _normalize_lookup_spec(spec: dict[str, Any], *, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -419,18 +440,24 @@ class LocalLiteratureAssistant:
             required_authors = list(fallback.get("required_authors") or [])
 
         preferred_year = spec.get("preferred_year")
+        if preferred_year is None:
+            preferred_year = fallback.get("preferred_year")
         try:
             preferred_year = int(preferred_year) if preferred_year is not None else None
         except (TypeError, ValueError):
             preferred_year = fallback.get("preferred_year")
 
         year_min = spec.get("year_min")
+        if year_min is None:
+            year_min = fallback.get("year_min")
         try:
             year_min = int(year_min) if year_min is not None else None
         except (TypeError, ValueError):
             year_min = fallback.get("year_min")
 
         year_max = spec.get("year_max")
+        if year_max is None:
+            year_max = fallback.get("year_max")
         try:
             year_max = int(year_max) if year_max is not None else None
         except (TypeError, ValueError):
@@ -513,6 +540,27 @@ class LocalLiteratureAssistant:
         return self._normalize_lookup_spec(payload, fallback=fallback)
 
     @staticmethod
+    def _with_lookup_clarification_if_needed(spec: dict[str, Any], task: TaskEnvelope) -> dict[str, Any]:
+        if spec.get("needs_clarification"):
+            return spec
+        query_terms = [str(item).strip() for item in spec.get("query_terms", []) if str(item).strip()]
+        has_author = bool(spec.get("required_authors"))
+        has_time = spec.get("preferred_year") is not None or spec.get("year_min") is not None or spec.get("year_max") is not None
+        has_title = bool(spec.get("title_phrases"))
+        has_multiword_topic = any(len(term.split()) >= 2 for term in query_terms)
+        has_topic_hint = bool(str(task.metadata.get("topic_hint") or "").strip())
+        if has_author or has_time or has_title or has_multiword_topic or has_topic_hint:
+            return spec
+
+        amended = dict(spec)
+        amended["needs_clarification"] = True
+        amended["clarification_question"] = (
+            "I do not yet have enough specific detail to search confidently. "
+            "Please provide any known title words, authors, year or year range, venue, or distinctive model details."
+        )
+        return amended
+
+    @staticmethod
     def _extract_author_surnames(text: str) -> list[str]:
         values: list[str] = []
         for match in re.finditer(r"\b([A-Z][A-Za-z'`.-]{2,})\s+(?:and|&)\s+([A-Z][A-Za-z'`.-]{2,})\b", text):
@@ -542,7 +590,7 @@ class LocalLiteratureAssistant:
         title = str(article.metadata.get("title") or "").strip()
         source = abstract or text[:1200].strip() or title
         if not source:
-            return "Neutral model reproduction target from the selected article."
+            return "Reproduction target from the selected article."
         return source
 
     @staticmethod
@@ -587,3 +635,37 @@ class LocalLiteratureAssistant:
             except json.JSONDecodeError:
                 pass
         return [item.strip(" -") for item in re.split(r"[\n;]+", text) if item.strip()]
+
+    @staticmethod
+    def _coerce_simulation_targets(raw: Any, *, model_description: str) -> list[dict[str, str]]:
+        if isinstance(raw, list):
+            return [
+                {
+                    "name": str(item.get("name") or item.get("title") or f"Target {index}").strip(),
+                    "description": str(item.get("description") or item.get("summary") or "").strip(),
+                }
+                for index, item in enumerate(raw, 1)
+                if isinstance(item, dict) and (item.get("name") or item.get("title") or item.get("description") or item.get("summary"))
+            ]
+        text = str(raw or "").strip()
+        if not text or text.upper() == "NOT_FOUND":
+            return []
+        if text.startswith("["):
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, list):
+                return LocalLiteratureAssistant._coerce_simulation_targets(data, model_description=model_description)
+        if "MULTIPLE_MODELS" not in text.upper():
+            return []
+        lines = [
+            line.strip(" -0123456789.)\t")
+            for line in text.splitlines()
+            if line.strip(" -0123456789.)\t")
+        ]
+        targets = [
+            {"name": f"Target {index}", "description": line}
+            for index, line in enumerate(lines, 1)
+        ]
+        return targets[:8]

@@ -34,6 +34,7 @@ export default function ResearchHub() {
   const [deskSettings, setDeskSettings] = useState(() => loadDeskSettings());
   const [focusLabel, setFocusLabel] = useState(DEFAULT_FOCUS_LABEL);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deskContext, setDeskContext] = useState("");
 
 
   // Health check on mount
@@ -49,6 +50,13 @@ export default function ResearchHub() {
 
   const setStatus = useCallback((tab, status) => {
     setTabStatus(p => ({ ...p, [tab]: status }));
+  }, []);
+
+  const handleAttachToDesk = useCallback((synthesis, papers) => {
+    const paperContext = papers.map(p => `- ${p.title} (${p.year || "?"}): ${p.abstract || ""}`).join("\n\n");
+    const context = `LITERATURE SYNTHESIS:\n${synthesis || "(none)"}\n\nRELEVANT PAPERS:\n${paperContext}`;
+    setDeskContext(context);
+    setActiveTab("directives");
   }, []);
 
   const handleArtifact = useCallback((agent, data) => {
@@ -192,12 +200,15 @@ export default function ResearchHub() {
             onArtifact={handleArtifact}
             professorName={deskSettings.professorName}
             onFocusChange={handleFocusChange}
+            incomingContext={deskContext}
+            onClearIncomingContext={() => setDeskContext("")}
           />
         )}
         {activeTab === "literature" && (
           <LitReviewPanel
             onArtifact={handleArtifact}
             onFocusChange={handleFocusChange}
+            onAttachToDesk={handleAttachToDesk}
           />
         )}
         {activeTab === "simulation" && (

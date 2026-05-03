@@ -236,12 +236,16 @@ class MediatorWorkflowRunner:
         brief: ArtifactRef,
         literature: ArtifactRef,
     ) -> list[ArtifactRef]:
+        selected_targets = self._resolve_simulation_target_scope(brief)
+        metadata: dict[str, Any] = {"sample_steps": 200}
+        if selected_targets:
+            metadata["selected_simulation_targets"] = selected_targets
         task = self._task(
             AssistantId.CODING_AGENT.value,
             task_id=f"{self.directive.directive_id}-simulation",
             subject="Design and run simulation",
             instructions=self.directive.instruction,
-            metadata={"sample_steps": 200},
+            metadata=metadata,
             output_dir=str((self.output_dir / "simulation_results").resolve()),
         )
         response = self.simulation_designer.start_simulation(task, sources=[article, brief, literature])
@@ -259,6 +263,45 @@ class MediatorWorkflowRunner:
             attachments=[artifact.as_attachment(name=artifact.title) for artifact in artifacts],
         )
         return artifacts
+
+    def _resolve_simulation_target_scope(self, brief: ArtifactRef) -> list[dict[str, Any]]:
+        targets = self._simulation_targets_from_brief(brief)
+        if len(targets) <= 1:
+            return targets
+
+        session_id = f"{self.directive.directive_id}-simulation-scope"
+        options_text = "\n".join(
+            f"{index}. {target.get('name') or 'Simulation target'}"
+            + (f" — {target.get('description')}" if target.get("description") else "")
+            for index, target in enumerate(targets, 1)
+        )
+        request = OrchestrationRequestEnvelope.new(
+            resume_token=session_id,
+            request_kind="selection",
+            question=(
+                "The article brief contains multiple simulation targets.\n\n"
+                f"{options_text}\n\n"
+                "Which target(s) should be simulated? You can answer with option numbers, names, or 'all'."
+            ),
+            expected_schema={"answers": {"selection": "string"}},
+            capability_hint="user",
+            metadata={"options": targets, "default_policy": "all"},
+        )
+
+        def _resume_selection(_session_id: str, payload: dict[str, Any]) -> MediatedResponse:
+            return MediatedResponse(
+                status="completed",
+                session_id=session_id,
+                payload={"selected_targets": self._select_targets(targets, payload)},
+            )
+
+        resolved = self._resolve_response(
+            service_id=AssistantId.ORCHESTRATOR.value,
+            response=MediatedResponse(status="needs_request", session_id=session_id, request=request),
+            resume_fn=_resume_selection,
+        )
+        selected = resolved.payload.get("selected_targets") if isinstance(resolved.payload, dict) else None
+        return list(selected or targets)
 
     def _phase_write(self, sources: list[ArtifactRef]) -> ArtifactRef:
         task = self._task(
@@ -300,18 +343,36 @@ class MediatorWorkflowRunner:
         while response.request is not None:
             self._raise_if_stopped()
             request = response.request
+            steering_metadata = self._request_steering_metadata(
+                service_id=service_id,
+                session_id=response.session_id,
+                request=request,
+            )
             self.flow_management.update_session_state(
                 directive_id,
                 response.session_id,
                 "waiting",
-                metadata={"request_kind": request.request_kind, "capability_hint": request.capability_hint or ""},
+                metadata={
+                    "request_kind": request.request_kind,
+                    "capability_hint": request.capability_hint or "",
+                    "request": request.to_dict(),
+                    "steering": steering_metadata,
+                },
             )
             if request.capability_hint == "user":
                 self._send_message(
                     assistant=service_id,
                     subject="Clarification requested",
-                    body=request.question,
-                    metadata={"session_id": response.session_id, "request_id": request.request_id},
+                    body=(
+                        f"{request.question}\n\n"
+                        "Reply in the response panel so I can resume this same agent session with your answer."
+                    ),
+                    metadata={
+                        "session_id": response.session_id,
+                        "request_id": request.request_id,
+                        "request": request.to_dict(),
+                        "steering": steering_metadata,
+                    },
                 )
                 injection = self.flow_management.wait_for_injection(response.session_id)
                 response = resume_fn(response.session_id, self._normalize_injection_payload(injection.payload))
@@ -376,6 +437,12 @@ class MediatorWorkflowRunner:
         return {"kind": "analysis_response", "answer": "NOT_IMPLEMENTED"}
 
     def _normalize_injection_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or "").strip()
+        if kind:
+            normalized = dict(payload)
+            if kind == "clarification_answers" and "answers" not in normalized:
+                normalized["answers"] = {}
+            return normalized
         if "answers" in payload:
             return {"kind": "clarification_answers", "answers": dict(payload.get("answers") or {})}
         feedback = str(payload.get("feedback") or "")
@@ -384,6 +451,78 @@ class MediatorWorkflowRunner:
         if "clarification" in payload:
             return {"kind": "clarification_answers", "answers": {"clarification": str(payload["clarification"])}}
         return {"kind": "steering_feedback", "feedback": json.dumps(payload)}
+
+    def _request_steering_metadata(
+        self,
+        *,
+        service_id: str,
+        session_id: str,
+        request: OrchestrationRequestEnvelope,
+    ) -> dict[str, Any]:
+        title = {
+            "clarification": "Answer agent clarification",
+            "selection": "Choose simulation scope",
+        }.get(request.request_kind, "Respond to agent request")
+        return {
+            "checkpoint_id": request.request_id,
+            "state": "awaiting_pi",
+            "kind": "agent_request",
+            "assistant": service_id,
+            "session_id": session_id,
+            "request_id": request.request_id,
+            "request_kind": request.request_kind,
+            "title": title,
+            "prompt": request.question,
+            "expected_schema": dict(request.expected_schema),
+            "request": request.to_dict(),
+        }
+
+    @staticmethod
+    def _simulation_targets_from_brief(brief: ArtifactRef) -> list[dict[str, Any]]:
+        raw_targets = brief.metadata.get("simulation_targets")
+        if not isinstance(raw_targets, list):
+            return []
+        targets: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_targets, 1):
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("title") or f"Target {index}").strip()
+                description = str(item.get("description") or item.get("summary") or "").strip()
+                metadata = {str(key): value for key, value in item.items() if key not in {"name", "title", "description", "summary"}}
+            else:
+                name = f"Target {index}"
+                description = str(item or "").strip()
+                metadata = {}
+            if not name and not description:
+                continue
+            targets.append({"name": name or f"Target {index}", "description": description, "metadata": metadata})
+        return targets
+
+    @staticmethod
+    def _select_targets(targets: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+        text = " ".join(
+            str(value)
+            for value in [
+                payload.get("selection"),
+                payload.get("feedback"),
+                payload.get("clarification"),
+                *(answers.values() if isinstance(answers, dict) else []),
+            ]
+            if str(value or "").strip()
+        ).strip()
+        if not text or text.lower() in {"all", "both", "everything"}:
+            return targets
+
+        selected: list[dict[str, Any]] = []
+        lowered = text.lower()
+        for index, target in enumerate(targets, 1):
+            name = str(target.get("name") or "").lower()
+            if str(index) in lowered.split() or f"{index}," in lowered or f"{index}." in lowered:
+                selected.append(target)
+                continue
+            if name and name in lowered:
+                selected.append(target)
+        return selected or targets
 
     def _artifact(self, artifact_id: str) -> ArtifactRef:
         artifact = self.artifact_registry.get(artifact_id)

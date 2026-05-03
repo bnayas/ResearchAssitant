@@ -302,7 +302,7 @@ class LocalCodingAssistant:
             if question.topic == QuestionTopic.VARIABLE_RANGE:
                 text = (
                     "Use the parameter values reported in the article. "
-                    "Treat the environmental noise amplitude and system size as the main sweep targets. "
+                    "Treat the article's reported sensitivity controls and system-size variables as the main sweep targets. "
                     f"Parsed parameters: {json.dumps(params)}"
                 )
             elif question.topic == QuestionTopic.STOPPING_THRESHOLD:
@@ -322,7 +322,7 @@ class LocalCodingAssistant:
                 )
             else:
                 text = (
-                    "Sweep the environmental stochasticity controls and any reported population-size variable first. "
+                    "Sweep the most important reported stochastic controls and scale variables first. "
                     f"Model context: {model_description or literature_summary}"
                 )
             answers[str(question.index)] = text

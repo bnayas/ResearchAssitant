@@ -6,13 +6,16 @@ Isolated service wrappers used by the mediator-first workflow.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import html
 import json
+import math
 from pathlib import Path
 from typing import Any, Optional
 
 from literature_review.article_parser import ArticleParser
 from literature_review.search_backends.arxiv_backend import ArXivBackend
 from literature_review.search_backends.semantic_scholar_backend import SemanticScholarBackend
+from literature_review.search_backends.perplexity_backend import PerplexityBackend
 from reviewer.journal_reviewer import JournalReviewer
 from reviewer.contract import ReviewTask
 from sim_tool.analyst import RunAnalyst
@@ -75,9 +78,38 @@ class LiteratureAgentService:
         self._profile = profile or AgentRuntimeProfile()
         self._backend = make_service_backend("literature_review", self._profile)
         self._local = LocalLiteratureAssistant(registry=registry, llm_backend=self._backend)
+        plugin_config = getattr(self._profile, "plugin_config", {}) or {}
+        arxiv_config = plugin_config.get("arxiv") or {}
+        ss_config = plugin_config.get("semantic_scholar") or {}
+        px_config = plugin_config.get("perplexity") or {}
+
+        primary_backend = None
+        fallback_backends = []
+
+        if arxiv_config.get("enabled", True):
+            primary_backend = ArXivBackend(sort_by="relevance")
+        
+        if ss_config.get("enabled", True):
+            backend = SemanticScholarBackend()
+            if primary_backend is None:
+                primary_backend = backend
+            else:
+                fallback_backends.append(backend)
+                
+        if px_config.get("enabled", False):
+            backend = PerplexityBackend()
+            if primary_backend is None:
+                primary_backend = backend
+            else:
+                fallback_backends.append(backend)
+
+        if primary_backend is None:
+            primary_backend = ArXivBackend(sort_by="relevance")
+            fallback_backends = [SemanticScholarBackend()]
+
         self._parser = ArticleParser(
-            ArXivBackend(sort_by="relevance"),
-            fallback_backends=[SemanticScholarBackend()],
+            primary_backend,
+            fallback_backends=fallback_backends,
         )
         self._sessions: dict[str, LiteratureTaskState] = {}
         self._article_cache: dict[str, dict[str, Any]] = {}
@@ -108,15 +140,19 @@ class LiteratureAgentService:
         state = self._sessions[session_id]
         if state.task_kind == "prepare_lookup":
             original_task = state.task
+            clarification = _clarification_text_from_payload(payload)
             amended_task = TaskEnvelope(
                 task_id=original_task.task_id,
                 directive_id=original_task.directive_id,
                 assistant=original_task.assistant,
                 requestor=original_task.requestor,
                 subject=original_task.subject,
-                instructions=original_task.instructions + "\n\nClarification:\n" + str(payload.get("clarification") or payload.get("feedback") or ""),
+                instructions=original_task.instructions + "\n\nClarification:\n" + clarification,
                 output_dir=original_task.output_dir,
-                metadata=dict(original_task.metadata),
+                metadata={
+                    **dict(original_task.metadata),
+                    "clarification_answers": dict(payload.get("answers") or {}),
+                },
                 attachments=list(original_task.attachments),
             )
             return self.prepare_article_lookup_spec(amended_task)
@@ -341,6 +377,7 @@ class SimulationDesignerService:
                 )
             if action == "run_sample":
                 diagnostics = payload.get("diagnostics") or {}
+                state.artifact_ids.extend(_artifact_ids_from_diagnostics(diagnostics))
                 if diagnostics.get("errors") or diagnostics.get("status") == "failed":
                     feedback = self._diagnostics_feedback("sample run failed", diagnostics)
                     result = self._designer.reject(session_id, feedback)
@@ -368,12 +405,15 @@ class SimulationDesignerService:
                 )
             if action == "run_sweep":
                 diagnostics = payload.get("diagnostics") or {}
+                state.artifact_ids.extend(_artifact_ids_from_diagnostics(diagnostics))
                 if diagnostics.get("errors") or diagnostics.get("status") == "failed":
                     feedback = self._diagnostics_feedback("full sweep failed", diagnostics)
                     result = self._designer.reject(session_id, feedback)
                     return self._from_designer_result(state, result)
                 analysis = self._analyse_runtime_results(session_id, diagnostics)
                 if analysis.verdict == Verdict.OK:
+                    plot_refs = self._persist_result_plots(session_id, analysis.data_files)
+                    state.artifact_ids.extend(ref.artifact_id for ref in plot_refs)
                     analysis_ref = self._registry.save_json(
                         assistant=AssistantId.CODING_AGENT.value,
                         kind="simulation_analysis",
@@ -518,6 +558,18 @@ class SimulationDesignerService:
 
     def _compose_description(self, task: TaskEnvelope, sources: list[ArtifactRef]) -> str:
         parts = [task.instructions.strip()]
+        selected_targets = task.metadata.get("selected_simulation_targets")
+        if isinstance(selected_targets, list) and selected_targets:
+            target_lines = []
+            for index, target in enumerate(selected_targets, 1):
+                if isinstance(target, dict):
+                    name = str(target.get("name") or f"Target {index}")
+                    description = str(target.get("description") or "").strip()
+                else:
+                    name = f"Target {index}"
+                    description = str(target or "").strip()
+                target_lines.append(f"{index}. {name}" + (f": {description}" if description else ""))
+            parts.append("Selected simulation target scope:\n" + "\n".join(target_lines))
         context_bits = []
         for source in sources:
             if source.kind == "article_brief":
@@ -573,6 +625,28 @@ class SimulationDesignerService:
                     if condition.name == condition_name:
                         setattr(condition, field_name, change.new_value)
                         break
+
+    def _persist_result_plots(self, session_id: str, data_files: list[Path]) -> list[ArtifactRef]:
+        refs: list[ArtifactRef] = []
+        for index, data_file in enumerate(data_files[:3], 1):
+            records = _read_jsonl_records(Path(data_file), limit=600)
+            svg = _render_numeric_svg(records, title=f"Run {index} data log")
+            if not svg:
+                continue
+            refs.append(
+                self._registry.save_text(
+                    assistant=AssistantId.CODING_AGENT.value,
+                    kind="simulation_result_plot",
+                    title=f"Simulation Result Plot {index}",
+                    filename=f"{session_id}/simulation/plots/result_plot_{index}.svg",
+                    text=svg,
+                    summary=f"Numeric data-log plot for {Path(data_file).parent.name}",
+                    metadata={"session_id": session_id, "data_file": str(data_file)},
+                    mime_type="image/svg+xml",
+                    artifact_id=f"{session_id}-simulation-result-plot-{index}",
+                )
+            )
+        return refs
 
 
 class AcademicWriterService:
@@ -729,3 +803,141 @@ def _analysis_to_dict(analysis: AnalysisResult) -> dict[str, Any]:
         "llm_reasoning": analysis.llm_reasoning,
         "data_files": [str(path) for path in analysis.data_files],
     }
+
+
+def _clarification_text_from_payload(payload: dict[str, Any]) -> str:
+    answers = payload.get("answers")
+    if isinstance(answers, dict) and answers:
+        parts = [
+            f"{key}: {value}" if str(key).strip() else str(value)
+            for key, value in answers.items()
+            if str(value or "").strip()
+        ]
+        if parts:
+            return "\n".join(parts)
+    for key in ("clarification", "feedback", "answer", "text"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _artifact_ids_from_diagnostics(diagnostics: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("result_ref", "diagnostics_ref", "raw_log_ref"):
+        value = str(diagnostics.get(key) or "").strip()
+        if not value:
+            continue
+        ids.extend(part.strip() for part in value.split(",") if part.strip())
+    metadata = diagnostics.get("metadata") if isinstance(diagnostics.get("metadata"), dict) else {}
+    ids.extend(
+        str(item).strip()
+        for item in metadata.get("plot_artifact_ids", [])
+        if str(item).strip()
+    )
+    return list(dict.fromkeys(ids))
+
+
+def _read_jsonl_records(path: Path, *, limit: int) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if len(records) >= limit:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _render_numeric_svg(records: list[dict[str, Any]], *, title: str) -> str:
+    if not records:
+        return ""
+    numeric_keys = [
+        key
+        for key in records[0].keys()
+        if key not in {"_event", "_reason"} and any(_is_finite_number(record.get(key)) for record in records)
+    ]
+    x_key = "step" if "step" in numeric_keys else None
+    y_keys = [key for key in numeric_keys if key not in {"step", "sim_time"}][:4]
+    if not y_keys:
+        return ""
+
+    x_values = [
+        float(record.get(x_key)) if x_key and _is_finite_number(record.get(x_key)) else float(index)
+        for index, record in enumerate(records)
+    ]
+    series: dict[str, list[tuple[float, float]]] = {}
+    for key in y_keys:
+        values: list[tuple[float, float]] = []
+        for index, record in enumerate(records):
+            value = record.get(key)
+            if _is_finite_number(value):
+                values.append((x_values[index], float(value)))
+        if len(values) >= 2:
+            series[key] = values
+    if not series:
+        return ""
+
+    width, height = 720, 420
+    left, right, top, bottom = 64, 24, 44, 58
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+    all_x = [point[0] for values in series.values() for point in values]
+    all_y = [point[1] for values in series.values() for point in values]
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
+    if x_min == x_max:
+        x_min -= 1
+        x_max += 1
+    if y_min == y_max:
+        padding = abs(y_min) * 0.1 or 1.0
+        y_min -= padding
+        y_max += padding
+
+    def sx(value: float) -> float:
+        return left + ((value - x_min) / (x_max - x_min)) * plot_w
+
+    def sy(value: float) -> float:
+        return top + plot_h - ((value - y_min) / (y_max - y_min)) * plot_h
+
+    colors = ["#2563eb", "#059669", "#d97706", "#7c3aed"]
+    polylines = []
+    legend = []
+    for idx, (key, values) in enumerate(series.items()):
+        color = colors[idx % len(colors)]
+        points = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in values)
+        safe_key = html.escape(str(key))
+        polylines.append(f'<polyline fill="none" stroke="{color}" stroke-width="2" points="{points}" />')
+        legend_y = top + 18 + idx * 18
+        legend.append(f'<line x1="{width - 170}" y1="{legend_y}" x2="{width - 148}" y2="{legend_y}" stroke="{color}" stroke-width="3" />')
+        legend.append(f'<text x="{width - 140}" y="{legend_y + 4}" font-size="12" fill="#334155">{safe_key}</text>')
+
+    safe_title = html.escape(title)
+    return "\n".join([
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#ffffff" />',
+        f'<text x="{left}" y="26" font-size="16" font-family="Arial, sans-serif" fill="#0f172a">{safe_title}</text>',
+        f'<line x1="{left}" y1="{top + plot_h}" x2="{left + plot_w}" y2="{top + plot_h}" stroke="#94a3b8" />',
+        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_h}" stroke="#94a3b8" />',
+        f'<text x="{left}" y="{height - 18}" font-size="12" fill="#475569">x: {html.escape(x_key or "record")}</text>',
+        f'<text x="12" y="{top + 12}" font-size="12" fill="#475569">value</text>',
+        *polylines,
+        *legend,
+        f'<text x="{left}" y="{top + plot_h + 20}" font-size="11" fill="#64748b">{x_min:.3g}</text>',
+        f'<text x="{left + plot_w - 40}" y="{top + plot_h + 20}" font-size="11" fill="#64748b">{x_max:.3g}</text>',
+        f'<text x="12" y="{top + plot_h}" font-size="11" fill="#64748b">{y_min:.3g}</text>',
+        f'<text x="12" y="{top + 4}" font-size="11" fill="#64748b">{y_max:.3g}</text>',
+        "</svg>",
+    ])
+
+
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and math.isfinite(float(value))

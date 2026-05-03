@@ -52,6 +52,7 @@ class SearchBackend(ABC):
         year_min: Optional[int] = None,
         year_max: Optional[int] = None,
         categories: Optional[list[str]] = None,
+        authors: Optional[list[str]] = None,
     ) -> list[RawPaper]:
         """
         Parameters
@@ -62,5 +63,6 @@ class SearchBackend(ABC):
         year_max    : Inclusive upper year bound (backend applies if supported)
         categories  : Domain/category filter (e.g. ArXiv categories); ignored by
                       backends that don't support it
+        authors     : Required authors to include in the query
         """
         ...

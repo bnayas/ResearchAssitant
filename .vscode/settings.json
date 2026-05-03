@@ -1,0 +1,38 @@
+{
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/.venv": true,
+    "**/project/.venv": true,
+    "**/node_modules": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/research_platform.egg-info": true,
+    "**/research_assistant_workspace.egg-info": true,
+    "**/programs": true,
+    "**/writer_jobs": true,
+    "**/simulations": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "**/project/.venv": true,
+    "**/node_modules": true,
+    "**/__pycache__": true,
+    "**/programs": true,
+    "**/writer_jobs": true,
+    "**/simulations": true
+  },
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/project/.venv/**": true,
+    "**/node_modules/**": true,
+    "**/__pycache__/**": true,
+    "**/programs/**": true,
+    "**/writer_jobs/**": true,
+    "**/simulations/**": true
+  }
+}

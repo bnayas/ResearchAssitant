@@ -378,6 +378,32 @@ def test_local_literature_assistant_prepares_article_query_with_llm(tmp_path):
     assert "stochastic gradient langevin dynamics" in spec["title_phrases"][0].lower()
 
 
+def test_local_literature_assistant_ignores_unrelated_lookup_json(tmp_path):
+    class _BadLookupLLM:
+        def complete(self, system, messages, temperature=0.0):
+            return json.dumps(
+                {
+                    "complete": True,
+                    "payload": {"name": "unrelated structured response"},
+                }
+            )
+
+    assistant = LocalLiteratureAssistant(ArtifactRegistry(root_dir=tmp_path), _BadLookupLLM())
+    task = TaskEnvelope(
+        task_id="lookup-bad-json",
+        directive_id="dir-bad-json",
+        assistant=AssistantId.LITERATURE_REVIEWER.value,
+        instructions="Read the 2014 Smith and Welling paper on stochastic gradient Langevin dynamics.",
+        metadata={"topic_hint": ""},
+    )
+
+    spec = assistant.prepare_article_lookup_spec(task)
+
+    assert spec["query_string"] == "stochastic gradient Langevin dynamics"
+    assert spec["required_authors"] == ["Smith", "Welling"]
+    assert spec["preferred_year"] == 2014
+
+
 def test_directive_runner_uses_literature_query_preparation_when_available(tmp_path):
     class _PreparedQueryLiteratureAssistant(_FakeLiteratureAssistant):
         def prepare_article_lookup_spec(self, task):

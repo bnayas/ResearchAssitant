@@ -110,6 +110,7 @@ class AgentLLMConfig(BaseModel):
     base_url: Optional[str] = Field(default=None, alias="url")
     api_key: Optional[str] = Field(default=None, alias="apiKey")
     timeout_seconds: Optional[float] = Field(default=None, alias="timeoutSeconds")
+    plugin_config: dict[str, Any] = Field(default_factory=dict, alias="pluginConfig")
     enabled: bool = True
 
 
@@ -484,6 +485,8 @@ class _StreamingMailbox:
         self.underlying = PIMailbox(output_dir=output_dir)
         
     def append(self, email):
+        if hasattr(self.underlying, "_coerce_message") and not hasattr(email, "from_agent"):
+            email = self.underlying._coerce_message(email)
         self.underlying.append(email)
         self.q.put({"type": "email", "email": email.to_dict()})
         
@@ -627,11 +630,24 @@ class DirectiveService:
             "done": job.done,
             "error": job.error,
             "emails": emails,
-            "pending_steering": None,
+            "pending_steering": _pending_steering_from_flow(flow_snapshot),
             "stop_requested": flow_snapshot["stop_requested"],
             "stop_reason": flow_snapshot["stop_reason"],
             "flow": flow_snapshot,
         }
+
+
+def _pending_steering_from_flow(flow_snapshot: dict[str, Any]) -> Optional[dict[str, Any]]:
+    for session in reversed(flow_snapshot.get("sessions") or []):
+        metadata = session.get("metadata") or {}
+        steering = metadata.get("steering")
+        if (
+            session.get("state") == "waiting"
+            and isinstance(steering, dict)
+            and steering.get("state") == "awaiting_pi"
+        ):
+            return dict(steering)
+    return None
 
 
 class LiteratureReviewService:
@@ -691,6 +707,45 @@ def create_app(
     writer_service: Optional[WriterService] = None,
     directive_service: Optional[DirectiveService] = None,
 ) -> FastAPI:
+    import logging
+    import logging.handlers
+
+    # Add a rotating file handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        "research_platform.log",
+        maxBytes=10485760,  # 10 MB
+        backupCount=5,
+    )
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
+    
+    # Get uvicorn loggers
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_error = logging.getLogger("uvicorn.error")
+    
+    # Avoid adding multiple handlers if create_app is called multiple times
+    if not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in uvicorn_logger.handlers):
+        uvicorn_logger.addHandler(file_handler)
+        uvicorn_access.addHandler(file_handler)
+        uvicorn_error.addHandler(file_handler)
+        # also add to root logger
+        logging.getLogger().addHandler(file_handler)
+        logging.getLogger().setLevel(logging.INFO)
+    
+    # Filter out /snapshot access logs to prevent spam
+    class EndpointFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            if hasattr(record, "args") and record.args and len(record.args) >= 3:
+                req_path = str(record.args[2])
+                if "/snapshot" in req_path:
+                    return False
+            return True
+
+    # Check if filter is already added
+    if not any(isinstance(f, EndpointFilter) for f in uvicorn_access.filters):
+        uvicorn_access.addFilter(EndpointFilter())
+
     simulation_manager = simulation_manager or SimulationSessionManager()
     literature_service = literature_service or LiteratureReviewService()
     writer_service = writer_service or WriterService()
@@ -913,7 +968,8 @@ def main() -> None:
             "sim_tool.api_server requires uvicorn. Install with `uv sync --extra api`."
         ) from exc
 
-    uvicorn.run(create_app(), host=args.host, port=args.port)
+    uvicorn.run("sim_tool.api_server:create_app", factory=True, host=args.host, port=args.port)
+
 
 
 if __name__ == "__main__":

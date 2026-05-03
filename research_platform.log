@@ -1,0 +1,461 @@
+2026-05-02 23:31:56,543 - uvicorn.error - INFO - Started server process [27340]
+2026-05-02 23:31:56,543 - uvicorn.error - INFO - Started server process [27340]
+2026-05-02 23:31:56,543 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-02 23:31:56,543 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-02 23:31:56,543 - uvicorn.error - INFO - Application startup complete.
+2026-05-02 23:31:56,543 - uvicorn.error - INFO - Application startup complete.
+2026-05-02 23:32:02,507 - uvicorn.error - INFO - Shutting down
+2026-05-02 23:32:02,507 - uvicorn.error - INFO - Shutting down
+2026-05-02 23:32:02,608 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-02 23:32:02,608 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-02 23:32:02,609 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-02 23:32:02,609 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-02 23:32:02,609 - uvicorn.error - INFO - Finished server process [27340]
+2026-05-02 23:32:02,609 - uvicorn.error - INFO - Finished server process [27340]
+2026-05-02 23:32:03,402 - uvicorn.error - INFO - Started server process [27352]
+2026-05-02 23:32:03,402 - uvicorn.error - INFO - Started server process [27352]
+2026-05-02 23:32:03,402 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-02 23:32:03,402 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-02 23:32:03,402 - uvicorn.error - INFO - Application startup complete.
+2026-05-02 23:32:03,402 - uvicorn.error - INFO - Application startup complete.
+2026-05-02 23:33:01,551 - uvicorn.access - INFO - 127.0.0.1:57856 - "GET /health HTTP/1.1" 200
+2026-05-02 23:33:01,570 - uvicorn.access - INFO - 127.0.0.1:57859 - "GET /health HTTP/1.1" 200
+2026-05-02 23:33:25,842 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-02 23:33:25,844 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=lit-1777754005843
+2026-05-02 23:33:30,958 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"machine learning" AND all:"deep neural networks"', 'max_results': 8, 'sortBy': 'relevance'}
+2026-05-02 23:34:54,445 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"artificial intelligence" AND all:"predictive modeling"', 'max_results': 8, 'sortBy': 'relevance'}
+2026-05-02 23:36:58,364 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"supervised learning" AND all:"classification algorithms"', 'max_results': 8, 'sortBy': 'relevance'}
+2026-05-02 23:38:59,256 - literature_review.director_bridge - INFO - [Director] Running audit for task_id=lit-1777754005843
+2026-05-02 23:38:59,258 - literature_review.auditor - INFO - [lit-1777754005843] Audit PASSED. 12 papers accepted.
+2026-05-02 23:38:59,258 - literature_review.director_bridge - INFO - [Director] Audit passed for task_id=lit-1777754005843
+2026-05-02 23:38:59,266 - uvicorn.access - INFO - 127.0.0.1:57877 - "POST /api/literature/reviews/run HTTP/1.1" 200
+2026-05-02 23:39:47,646 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-02 23:39:47,648 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=lit-1777754387646
+2026-05-02 23:39:51,058 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"machine learning" AND all:"deep neural networks"', 'max_results': 8, 'sortBy': 'relevance'}
+2026-05-02 23:40:59,674 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"artificial intelligence" AND all:"supervised classification"', 'max_results': 8, 'sortBy': 'relevance'}
+2026-05-02 23:42:47,701 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"reinforcement learning" AND all:"policy optimization"', 'max_results': 8, 'sortBy': 'relevance'}
+2026-05-03 00:01:58,296 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:01:58,296 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:01:58,416 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:01:58,416 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:01:58,424 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:01:58,424 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:01:58,424 - uvicorn.error - INFO - Finished server process [27352]
+2026-05-03 00:01:58,424 - uvicorn.error - INFO - Finished server process [27352]
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Started server process [35898]
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Started server process [35898]
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:02:39,133 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:03:47,709 - uvicorn.access - INFO - 127.0.0.1:59178 - "GET /health HTTP/1.1" 200
+2026-05-03 00:03:47,718 - uvicorn.access - INFO - 127.0.0.1:59179 - "GET /health HTTP/1.1" 200
+2026-05-03 00:07:18,668 - uvicorn.access - INFO - 127.0.0.1:59310 - "GET /health HTTP/1.1" 200
+2026-05-03 00:07:18,682 - uvicorn.access - INFO - 127.0.0.1:59315 - "GET /health HTTP/1.1" 200
+2026-05-03 00:08:29,110 - uvicorn.access - INFO - 127.0.0.1:59360 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 00:08:29,229 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:08:29,232 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:08:29,233 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:08:29,234 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:08:29,235 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 00:08:29,237 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:08:29,240 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:09:59,631 - uvicorn.access - INFO - 127.0.0.1:59481 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 00:09:59,639 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:09:59,647 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:09:59,651 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:09:59,655 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:09:59,659 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 00:09:59,662 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:09:59,665 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:10:04,966 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"machine learning"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:10:19,493 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via arxiv for query 'machine learning'
+2026-05-03 00:10:20,222 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar rate-limited; entering cooldown for 299s
+2026-05-03 00:10:20,747 - literature_review.article_parser - INFO - Successfully fetched ar5iv full text for 2306.04338v1
+2026-05-03 00:10:36,179 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=dir-1777756199623-literature-review-lit
+2026-05-03 00:10:41,827 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Machine Learning" AND all:"Official Statistics" AND all:"Data Quality"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:10:59,947 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Machine Learning" OR all:"Official Statistics" OR all:"Data Quality"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:12:02,428 - literature_review.director_bridge - INFO - [Director] Running audit for task_id=dir-1777756199623-literature-review-lit
+2026-05-03 00:12:02,431 - literature_review.auditor - INFO - [dir-1777756199623-literature-review-lit] Audit PASSED. 5 papers accepted.
+2026-05-03 00:12:02,432 - literature_review.director_bridge - INFO - [Director] Audit passed for task_id=dir-1777756199623-literature-review-lit
+2026-05-03 00:12:02,445 - sim_tool.designer - INFO - [54f7207b] New session — 'Find papers on machine learning and summarize them\n\nContext '…
+2026-05-03 00:12:55,322 - sim_tool.designer - INFO - [54f7207b] Clarification round 1: 4 question(s)
+2026-05-03 00:13:40,942 - uvicorn.access - INFO - 127.0.0.1:60071 - "POST /api/directives/dir-1777756199623/stop HTTP/1.1" 200
+2026-05-03 00:27:53,781 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:27:53,781 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:27:53,889 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:27:53,889 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:27:53,891 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:27:53,891 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:27:53,892 - uvicorn.error - INFO - Finished server process [35898]
+2026-05-03 00:27:53,892 - uvicorn.error - INFO - Finished server process [35898]
+2026-05-03 00:28:14,067 - uvicorn.error - INFO - Started server process [37513]
+2026-05-03 00:28:14,067 - uvicorn.error - INFO - Started server process [37513]
+2026-05-03 00:28:14,067 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:28:14,067 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:28:14,068 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:28:14,068 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:28:14,068 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:28:14,068 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:28:55,845 - uvicorn.access - INFO - 127.0.0.1:60744 - "GET /health HTTP/1.1" 200
+2026-05-03 00:29:47,269 - uvicorn.access - INFO - 127.0.0.1:60802 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 00:29:47,337 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:29:47,339 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:29:47,340 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:29:47,341 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:29:47,342 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 00:29:47,344 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:29:47,345 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:30:05,804 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"environmental fluctuations" AND all:"neutral model"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:30:08,905 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"environmental fluctuations" OR all:"neutral model"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:30:09,628 - literature_review.article_parser - INFO - Article lookup received 3 result(s) via arxiv for query 'environmental fluctuations, neutral model'
+2026-05-03 00:30:10,497 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar rate-limited; entering cooldown for 299s
+2026-05-03 00:30:12,013 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"2017"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:30:14,290 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via arxiv for query '2017'
+2026-05-03 00:30:14,290 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 296s
+2026-05-03 00:30:15,105 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Danino" AND all:"Shnerb" AND all:"environmental fluctuations" AND all:"neutral model"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:30:18,205 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Danino" OR all:"Shnerb" OR all:"environmental fluctuations" OR all:"neutral model"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:30:19,083 - literature_review.article_parser - INFO - Article lookup received 3 result(s) via arxiv for query 'Danino, Shnerb, environmental fluctuations, neutral model'
+2026-05-03 00:38:15,716 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:38:15,716 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:38:15,820 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:38:15,820 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:38:15,821 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:38:15,821 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:38:15,822 - uvicorn.error - INFO - Finished server process [37513]
+2026-05-03 00:38:15,822 - uvicorn.error - INFO - Finished server process [37513]
+2026-05-03 00:38:19,710 - uvicorn.error - INFO - Started server process [38255]
+2026-05-03 00:38:19,710 - uvicorn.error - INFO - Started server process [38255]
+2026-05-03 00:38:19,710 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:38:19,710 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:38:19,711 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:38:19,711 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:38:19,711 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:38:19,711 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:38:26,555 - uvicorn.access - INFO - 127.0.0.1:61205 - "GET /health HTTP/1.1" 200
+2026-05-03 00:38:45,688 - uvicorn.access - INFO - 127.0.0.1:61218 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 00:38:45,748 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:38:45,752 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:38:45,753 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:38:45,754 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:38:45,755 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 00:38:45,758 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:38:45,760 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:38:49,815 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" AND all:"environmental fluctuations" AND au:"Danino" AND au:"Shnerb"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:38:52,917 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': '(all:"neutral model" OR all:"environmental fluctuations") AND (au:"Danino" AND au:"Shnerb")', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:38:53,559 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via arxiv for query 'neutral model, environmental fluctuations'
+2026-05-03 00:38:54,566 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via semantic_scholar for query 'neutral model, environmental fluctuations'
+2026-05-03 00:39:07,701 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=dir-1777757925673-literature-review-lit
+2026-05-03 00:39:10,895 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" AND all:"environmental stochasticity" AND all:"time average"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:39:22,337 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar rate-limited; entering cooldown for 299s
+2026-05-03 00:39:22,341 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"ecological dynamics" AND all:"stochastic process" AND all:"population growth rate"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:39:25,443 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"ecological dynamics" OR all:"stochastic process" OR all:"population growth rate"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:39:51,648 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 270s
+2026-05-03 00:39:51,649 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"density dependence" AND all:"temporal averaging" AND all:"extinction probability"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:39:54,752 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"density dependence" OR all:"temporal averaging" OR all:"extinction probability"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:40:22,566 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 239s
+2026-05-03 00:40:22,573 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"meta-population dynamics" AND all:"environmental variability"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:40:25,674 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"meta-population dynamics" OR all:"environmental variability"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:40:54,853 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 207s
+2026-05-03 00:41:11,260 - literature_review.director_bridge - INFO - [Director] Running audit for task_id=dir-1777757925673-literature-review-lit
+2026-05-03 00:41:11,262 - literature_review.auditor - INFO - [dir-1777757925673-literature-review-lit] Audit PASSED. 1 papers accepted.
+2026-05-03 00:41:11,262 - literature_review.director_bridge - INFO - [Director] Audit passed for task_id=dir-1777757925673-literature-review-lit
+2026-05-03 00:41:11,286 - sim_tool.designer - INFO - [8f4475f4] New session — 'Read Danino and Shnerb article about adding environmental fl'…
+2026-05-03 00:41:49,936 - research_platform.mediated_workflow - ERROR - Mediated workflow failed:
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_workflow.py", line 111, in run_all_phases
+    simulation_artifacts = self._phase_simulation(article, brief, literature)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_workflow.py", line 251, in _phase_simulation
+    response = self.simulation_designer.start_simulation(task, sources=[article, brief, literature])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_services.py", line 331, in start_simulation
+    result = self._designer.start(description)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/designer.py", line 184, in start
+    return self._call(state, initial=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/designer.py", line 271, in _call
+    raise ValueError(f"[{sid}] LLM returned non-JSON output")
+ValueError: [8f4475f4] LLM returned non-JSON output
+
+2026-05-03 00:47:10,827 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:47:10,827 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:47:10,934 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:47:10,934 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:47:10,936 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:47:10,936 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:47:10,937 - uvicorn.error - INFO - Finished server process [38255]
+2026-05-03 00:47:10,937 - uvicorn.error - INFO - Finished server process [38255]
+2026-05-03 00:47:14,245 - uvicorn.error - INFO - Started server process [38994]
+2026-05-03 00:47:14,245 - uvicorn.error - INFO - Started server process [38994]
+2026-05-03 00:47:14,245 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:47:14,245 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:47:14,245 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:47:14,245 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:47:14,246 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:47:14,246 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:47:30,884 - uvicorn.access - INFO - 127.0.0.1:61948 - "GET /health HTTP/1.1" 200
+2026-05-03 00:47:52,822 - uvicorn.access - INFO - 127.0.0.1:61962 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 00:47:52,885 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:47:52,888 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:47:52,889 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:47:52,889 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:47:52,890 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 00:47:52,892 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:47:52,894 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:47:58,519 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" AND all:"environmental fluctuations" AND au:"Danino" AND au:"Shnerb"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:48:01,624 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': '(all:"neutral model" OR all:"environmental fluctuations") AND (au:"Danino" AND au:"Shnerb")', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:48:01,907 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via arxiv for query 'neutral model, environmental fluctuations'
+2026-05-03 00:48:02,577 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar rate-limited; entering cooldown for 299s
+2026-05-03 00:48:03,519 - literature_review.article_parser - INFO - Successfully fetched ar5iv full text for 1602.03093v1
+2026-05-03 00:48:28,313 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=dir-1777758472801-literature-review-lit
+2026-05-03 00:48:34,194 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"time-average neutral model" AND all:"biodiversity" AND all:"environmental stochasticity"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:48:40,585 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 261s
+2026-05-03 00:48:40,586 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"metacommunity dynamics" AND all:"demographic noise" AND all:"speciation extinction"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:48:43,688 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"metacommunity dynamics" OR all:"demographic noise" OR all:"speciation extinction"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:49:11,455 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 231s
+2026-05-03 00:49:11,457 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Chesson-Warner model" AND all:"lottery game" AND all:"two-species"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:49:14,557 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Chesson-Warner model" OR all:"lottery game" OR all:"two-species"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:49:43,455 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 199s
+2026-05-03 00:49:43,455 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"ecological stochasticity" AND all:"community assembly" AND all:"neutral theory of biodiversity"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:49:46,558 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"ecological stochasticity" OR all:"community assembly" OR all:"neutral theory of biodiversity"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:50:14,959 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 167s
+2026-05-03 00:50:14,962 - literature_review.director_bridge - INFO - [Director] Running audit for task_id=dir-1777758472801-literature-review-lit
+2026-05-03 00:50:14,962 - literature_review.auditor - INFO - [dir-1777758472801-literature-review-lit] Audit PASSED. 0 papers accepted.
+2026-05-03 00:50:14,962 - literature_review.director_bridge - INFO - [Director] Audit passed for task_id=dir-1777758472801-literature-review-lit
+2026-05-03 00:51:21,584 - sim_tool.designer - INFO - [11a8779d] New session — 'Read Danino and Shnerb article about adding environmental fl'…
+2026-05-03 00:51:21,586 - uvicorn.access - INFO - 127.0.0.1:62561 - "POST /api/directives/dir-1777758472801/steering HTTP/1.1" 200
+2026-05-03 00:53:21,592 - sim_tool.designer - ERROR - [11a8779d] LLM error: timed out
+2026-05-03 00:53:21,636 - research_platform.mediated_workflow - ERROR - Mediated workflow failed:
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_workflow.py", line 111, in run_all_phases
+    simulation_artifacts = self._phase_simulation(article, brief, literature)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_workflow.py", line 251, in _phase_simulation
+    response = self.simulation_designer.start_simulation(task, sources=[article, brief, literature])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_services.py", line 331, in start_simulation
+    result = self._designer.start(description)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/designer.py", line 184, in start
+    return self._call(state, initial=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/designer.py", line 259, in _call
+    raw = self._backend.complete(
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/llm.py", line 295, in complete
+    with urllib.request.urlopen(req, timeout=self._timeout_seconds) as r:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/urllib/request.py", line 215, in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/urllib/request.py", line 515, in open
+    response = self._open(req, data)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/urllib/request.py", line 532, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/urllib/request.py", line 492, in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/urllib/request.py", line 1373, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/urllib/request.py", line 1348, in do_open
+    r = h.getresponse()
+        ^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/http/client.py", line 1430, in getresponse
+    response.begin()
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/http/client.py", line 331, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/http/client.py", line 292, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/socket.py", line 720, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+TimeoutError: timed out
+
+2026-05-03 00:57:59,946 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:57:59,946 - uvicorn.error - INFO - Shutting down
+2026-05-03 00:58:00,051 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:58:00,051 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 00:58:00,054 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:58:00,054 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 00:58:00,054 - uvicorn.error - INFO - Finished server process [38994]
+2026-05-03 00:58:00,054 - uvicorn.error - INFO - Finished server process [38994]
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Started server process [39903]
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Started server process [39903]
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:58:04,780 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 00:58:14,767 - uvicorn.access - INFO - 127.0.0.1:63034 - "GET /health HTTP/1.1" 200
+2026-05-03 00:58:34,923 - uvicorn.access - INFO - 127.0.0.1:63046 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 00:58:34,988 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:58:34,989 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:58:34,990 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:58:34,990 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 00:58:34,992 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 00:58:34,994 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:58:34,995 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 00:58:39,552 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" AND all:"environmental fluctuations" AND au:"Danino" AND au:"Shnerb"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:58:42,653 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': '(all:"neutral model" OR all:"environmental fluctuations") AND (au:"Danino" AND au:"Shnerb")', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:58:42,934 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via arxiv for query 'neutral model, environmental fluctuations'
+2026-05-03 00:58:44,668 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar rate-limited; entering cooldown for 299s
+2026-05-03 00:58:46,518 - literature_review.article_parser - INFO - Successfully fetched ar5iv full text for 1602.03093v1
+2026-05-03 00:59:11,292 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=dir-1777759114904-literature-review-lit
+2026-05-03 00:59:15,868 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"time-average neutral theory" AND all:"metacommunity" AND all:"environmental stochasticity"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:59:18,970 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"time-average neutral theory" OR all:"metacommunity" OR all:"environmental stochasticity"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:59:46,786 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 237s
+2026-05-03 00:59:46,787 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Chesson-Warner lottery game" AND all:"temporal fluctuation" AND all:"two species"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 00:59:49,888 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"Chesson-Warner lottery game" OR all:"temporal fluctuation" OR all:"two species"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 01:00:16,500 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 208s
+2026-05-03 01:00:16,502 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"biodiversity dynamics" AND all:"demographic noise" AND all:"extinction speciation"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 01:00:25,432 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"biodiversity dynamics" OR all:"demographic noise" OR all:"extinction speciation"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 01:00:57,332 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 167s
+2026-05-03 01:00:57,333 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral theory of biodiversity" AND all:"stochastic processes" AND all:"species richness"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 01:01:06,091 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral theory of biodiversity" OR all:"stochastic processes" OR all:"species richness"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 01:01:31,287 - literature_review.search_backends.arxiv_backend - WARNING - ArXiv aiohttp attempt 1 failed: TimeoutError()
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 539, in start
+    message, payload = await protocol.read()  # type: ignore[union-attr]
+                       ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/streams.py", line 707, in read
+    await self._waiter
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/project/literature_review/search_backends/arxiv_backend.py", line 92, in _fetch_with_retry
+    async with session.get(ARXIV_API, params=params, allow_redirects=True) as resp:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client.py", line 1521, in __aenter__
+    self._resp: _RetType = await self._coro
+                           ^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client.py", line 788, in _request
+    resp = await handler(req)
+           ^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client.py", line 766, in _connect_and_send_request
+    await resp.start(conn)
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 534, in start
+    with self._timer:
+         ^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/helpers.py", line 713, in __exit__
+    raise asyncio.TimeoutError from exc_val
+TimeoutError
+2026-05-03 01:01:34,311 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral theory of biodiversity" OR all:"stochastic processes" OR all:"species richness"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 01:02:00,295 - literature_review.search_backends.arxiv_backend - WARNING - ArXiv aiohttp attempt 2 failed: TimeoutError()
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 539, in start
+    message, payload = await protocol.read()  # type: ignore[union-attr]
+                       ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/streams.py", line 707, in read
+    await self._waiter
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/project/literature_review/search_backends/arxiv_backend.py", line 92, in _fetch_with_retry
+    async with session.get(ARXIV_API, params=params, allow_redirects=True) as resp:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client.py", line 1521, in __aenter__
+    self._resp: _RetType = await self._coro
+                           ^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client.py", line 788, in _request
+    resp = await handler(req)
+           ^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client.py", line 766, in _connect_and_send_request
+    await resp.start(conn)
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 534, in start
+    with self._timer:
+         ^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/.venv/lib/python3.12/site-packages/aiohttp/helpers.py", line 713, in __exit__
+    raise asyncio.TimeoutError from exc_val
+TimeoutError
+2026-05-03 01:02:26,568 - literature_review.search_backends.arxiv_backend - WARNING - ArXiv urllib fallback failed: The read operation timed out
+2026-05-03 01:02:26,569 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 78s
+2026-05-03 01:02:26,570 - literature_review.director_bridge - INFO - [Director] Running audit for task_id=dir-1777759114904-literature-review-lit
+2026-05-03 01:02:26,570 - literature_review.auditor - INFO - [dir-1777759114904-literature-review-lit] Audit PASSED. 0 papers accepted.
+2026-05-03 01:02:26,570 - literature_review.director_bridge - INFO - [Director] Audit passed for task_id=dir-1777759114904-literature-review-lit
+2026-05-03 17:19:36,052 - uvicorn.error - INFO - Shutting down
+2026-05-03 17:19:36,052 - uvicorn.error - INFO - Shutting down
+2026-05-03 17:19:36,186 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 17:19:36,186 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 17:19:36,202 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 17:19:36,202 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 17:19:36,203 - uvicorn.error - INFO - Finished server process [39903]
+2026-05-03 17:19:36,203 - uvicorn.error - INFO - Finished server process [39903]
+2026-05-03 17:21:25,062 - uvicorn.error - INFO - Started server process [78270]
+2026-05-03 17:21:25,062 - uvicorn.error - INFO - Started server process [78270]
+2026-05-03 17:21:25,063 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 17:21:25,063 - uvicorn.error - INFO - Waiting for application startup.
+2026-05-03 17:21:25,063 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 17:21:25,063 - uvicorn.error - INFO - Application startup complete.
+2026-05-03 17:21:25,063 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 17:21:25,063 - uvicorn.error - INFO - Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+2026-05-03 17:21:58,765 - uvicorn.access - INFO - 127.0.0.1:59573 - "GET /health HTTP/1.1" 200
+2026-05-03 17:22:33,891 - uvicorn.access - INFO - 127.0.0.1:59602 - "POST /api/directives HTTP/1.1" 200
+2026-05-03 17:22:34,079 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 17:22:34,093 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 17:22:34,096 - sim_tool.designer - INFO - Designer using google/gemma-4-e4b | memory: 0 entries
+2026-05-03 17:22:34,097 - sim_tool.analyst - INFO - Analyst initialised | backend=google/gemma-4-e4b | memory: 0 entries
+2026-05-03 17:22:34,099 - sim_tool.launcher - INFO - Launcher ready | preferred_mode=docker | log=/Users/bnayas/.sim_tool/launcher_log.md
+2026-05-03 17:22:34,101 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 17:22:34,102 - sim_tool.llm - INFO - Resolved lmstudio model 'google/gemma-4-e4b' from http://localhost:1234/v1
+2026-05-03 17:22:54,735 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"environmental fluctuations" AND all:"neutral model" AND au:"Danino" AND au:"Shnerb"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:22:57,836 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': '(all:"environmental fluctuations" OR all:"neutral model") AND (au:"Danino" AND au:"Shnerb")', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:22:58,521 - literature_review.article_parser - INFO - Article lookup received 5 result(s) via arxiv for query 'environmental fluctuations, neutral model'
+2026-05-03 17:23:00,155 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar rate-limited; entering cooldown for 299s
+2026-05-03 17:23:01,683 - literature_review.article_parser - INFO - Successfully fetched ar5iv full text for 1711.11332v3
+2026-05-03 17:23:26,076 - literature_review.director_bridge - INFO - [Director] Starting literature review task_id=dir-1777818153845-literature-review-lit
+2026-05-03 17:23:29,545 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" AND all:"local competition" AND all:"linear fitness dependence"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:23:35,871 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 264s
+2026-05-03 17:23:35,878 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" AND all:"global competition" AND all:"nonlinear fitness dependence"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:23:38,980 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"neutral model" OR all:"global competition" OR all:"nonlinear fitness dependence"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:24:06,616 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 233s
+2026-05-03 17:24:06,618 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"birth-death process" AND all:"time-averaged neutrality"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:24:09,719 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"birth-death process" OR all:"time-averaged neutrality"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:24:37,142 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 203s
+2026-05-03 17:24:37,143 - literature_review.search_backends.arxiv_backend - INFO - ArXiv request URL: http://export.arxiv.org/api/query, params: {'search_query': 'all:"population genetics" AND all:"ecological modeling"', 'max_results': 5, 'sortBy': 'relevance'}
+2026-05-03 17:24:48,350 - literature_review.search_backends.semantic_scholar_backend - WARNING - SemanticScholar cooldown active; skipping request for 191s
+2026-05-03 17:24:48,352 - literature_review.director_bridge - INFO - [Director] Running audit for task_id=dir-1777818153845-literature-review-lit
+2026-05-03 17:24:48,354 - literature_review.auditor - INFO - [dir-1777818153845-literature-review-lit] Audit PASSED. 0 papers accepted.
+2026-05-03 17:24:48,355 - literature_review.director_bridge - INFO - [Director] Audit passed for task_id=dir-1777818153845-literature-review-lit
+2026-05-03 17:27:40,707 - sim_tool.designer - INFO - [2df5741e] New session — 'Read Danino and Shnerb article about adding environmental fl'…
+2026-05-03 17:27:40,707 - uvicorn.access - INFO - 127.0.0.1:60598 - "POST /api/directives/dir-1777818153845/steering HTTP/1.1" 200
+2026-05-03 17:28:55,558 - sim_tool.designer - WARNING - JSON decode failed on extracted block: Invalid \escape: line 6 column 140 (char 208). Raw was: '{\n  "spec_complete": false,\n  "questions": [\n    {\n      "index": 1,\n      "text": "What specific numerical values and ranges should be used for $N$ (number of individuals), $\\nu$ (mutation rate per birth), $\\delta$ (environmental correlation time in generations), and $\\gamma$ (amplitude of fitness fluctuations)?",\n      "topic": "variable_range",\n      "required": true\n    },\n    {\n      "index": 2,\n      "text": "Does the simulation need to reproduce specific numerical results or figures from '
+2026-05-03 17:28:55,588 - research_platform.mediated_workflow - ERROR - Mediated workflow failed:
+Traceback (most recent call last):
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_workflow.py", line 111, in run_all_phases
+    simulation_artifacts = self._phase_simulation(article, brief, literature)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_workflow.py", line 251, in _phase_simulation
+    response = self.simulation_designer.start_simulation(task, sources=[article, brief, literature])
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/research_platform/mediated_services.py", line 331, in start_simulation
+    result = self._designer.start(description)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/designer.py", line 184, in start
+    return self._call(state, initial=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bnayas/repos/ResearchAssitant/project/sim_tool/designer.py", line 271, in _call
+    raise ValueError(f"[{sid}] LLM returned non-JSON output")
+ValueError: [2df5741e] LLM returned non-JSON output
+
+2026-05-03 22:52:09,268 - uvicorn.error - INFO - Shutting down
+2026-05-03 22:52:09,268 - uvicorn.error - INFO - Shutting down
+2026-05-03 22:52:09,404 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 22:52:09,404 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-05-03 22:52:09,415 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 22:52:09,415 - uvicorn.error - INFO - Application shutdown complete.
+2026-05-03 22:52:09,416 - uvicorn.error - INFO - Finished server process [78270]
+2026-05-03 22:52:09,416 - uvicorn.error - INFO - Finished server process [78270]
