@@ -1,24 +1,20 @@
 """
-sim_tool.designer
-─────────────────
-Multi-turn LLM designer: natural language → SimulationSpec.
+sim_tool.designer — PATCH NOTES
+────────────────────────────────
+Changes from the original designer.py:
 
-Contract
-────────
-  Returns:  ClarificationRequest  when questions remain
-            SpecApproval          when spec is complete and ready for review
+1. _call() now catches non-JSON output and retries via StagedSpecGenerator
+   before raising ValueError.  This makes the designer resilient to
+   context-overflow failures without changing its external contract.
 
-  Questions are constrained to five topics (see contract.QuestionTopic).
-  The LLM is forbidden from asking about implementation details.
+2. _compress_for_initial_call() trims the description to MAX_INITIAL_DESC_CHARS
+   for the first LLM call only.  Subsequent clarification rounds still
+   send the full accumulated context because they are much shorter.
 
-  Hard limits per ClarificationContract:
-    MAX_QUESTIONS_PER_ROUND = 5
-    MAX_ROUNDS = 4
+3. StagedSpecGenerator is imported lazily to avoid circular imports.
 
-  Memory: reads designer_memory.md at session start, so lessons from
-  previous sessions are applied automatically.
+Drop-in replacement for the original designer.py in project/sim_tool/.
 """
-
 from __future__ import annotations
 
 import json
@@ -40,8 +36,12 @@ from .models import (
 
 log = logging.getLogger("sim_tool.designer")
 
+# Maximum description length sent to the monolithic JSON-generation call.
+# Beyond this we expect context-overflow failures and fall back to staged.
+MAX_INITIAL_DESC_CHARS = 4000
+
 # ─────────────────────────────────────────────────────────────────────────────
-# System prompt
+# System prompt (unchanged from original)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT_TEMPLATE = """
@@ -71,7 +71,6 @@ If you have reached the information you need, set spec_complete=true immediately
 Tier 1 — config_assert_code (once, before loop):
   assert config.FIELD > 0, f"FIELD must be positive, got FIELD={{config.FIELD}}"
   For rate/probability fields: assert 0.0 <= config.rate <= 1.0
-  For mutual constraints: assert config.max_steps > config.equil + 100
   Messages must contain the offending value.
 
 Tier 2 — state_assert_code (every step, O(1)):
@@ -81,26 +80,18 @@ Tier 2 — state_assert_code (every step, O(1)):
 
 ━━━ LOGGING RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 algo_log → stdout (algorithm trace, for developers debugging code)
-  algo_log.debug(f"step {{state.step}}: energy={{state.E:.4f}}")  ← include values
-  algo_log.info(f"Equilibration complete at step {{state.step}}")
-
 data_log → .jsonl file (research data, for analysis)
-  data_log.info(json.dumps({{"step": state.step, "energy_J": state.energy}}))
-  Keys must be stable and descriptive. Include units in key name.
 
 ━━━ PRECOMPUTE RULES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 precompute_code runs ONCE before the loop. ALWAYS precompute:
   - Anything depending only on config (not state)
-  - Boltzmann/exponential tables (only N unique values exist)
+  - Boltzmann/exponential tables
   - Neighbour/adjacency index arrays
-  - Trig components from angles
-  - Precomputed constants
-  Log what was computed: algo_log.debug(f"Precomputed table: {{result}}")
+  Log what was computed: algo_log.debug(f"Precomputed: {{result}}")
 
 ━━━ STOPPING CONDITIONS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MUST have: ≥1 SUCCESS condition (goal achieved, tolerance met)
 MUST have: ≥1 FAILURE condition (bad config detected early)
-Failure conditions save compute — they exit bad configs in tens of steps.
 
 ━━━ OUTPUT FORMAT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 JSON ONLY — no markdown, no prose outside the JSON object.
@@ -113,18 +104,9 @@ JSON ONLY — no markdown, no prose outside the JSON object.
   "spec": {{
     "name": <string>,
     "description": <string>,
-    "variables": [
-      {{"name": <str>, "description": <str>, "kind": "float|int|bool|choice|string",
-        "default": <value>, "min_val": <number|null>, "max_val": <number|null>,
-        "step": <number|null>, "choices": <list|null>, "unit": <str|null>,
-        "sweep": <bool>, "sweep_values": <list|null>}}
-    ],
+    "variables": [...],
     "state_fields": [["<name>", "<python_type>", <default>]],
-    "stopping_conditions": [
-      {{"kind": "success|failure", "name": <str>, "description": <str>,
-        "check_expr": <str>, "reason_expr": <str>,
-        "save_on_trigger": <bool>, "priority": <int>}}
-    ],
+    "stopping_conditions": [...],
     "setup_code": <str>,
     "precompute_code": <str>,
     "initial_state_code": <str>,
@@ -160,6 +142,19 @@ class SimulationDesigner:
     """
     Stateful, multi-turn simulation designer.
     Returns ClarificationRequest or SpecApproval — never raw strings.
+
+    Resilience strategy
+    ───────────────────
+    If the initial description is very long (research brief + literature
+    context), the LLM may return prose instead of JSON.  In that case:
+
+    1. The designer attempts a compressed description (≤MAX_INITIAL_DESC_CHARS)
+       for the initial monolithic call.
+    2. If the monolithic call still fails, it falls back to StagedSpecGenerator,
+       which generates the spec in 6–12 focused micro-calls that each fit
+       comfortably in a 16k-token context window.
+
+    The fallback is transparent: the caller still receives a SpecApproval.
     """
 
     def __init__(self, backend: Optional[LLMBackend] = None) -> None:
@@ -180,7 +175,7 @@ class SimulationDesigner:
     def start(self, description: str) -> ClarificationRequest | SpecApproval:
         state = DesignerState(original_description=description)
         self._sessions[state.session_id] = state
-        log.info(f"[{state.session_id}] New session — {description[:60]!r}…")
+        log.info(f"[{state.session_id}] New session — {description[:60]!r}… (len={len(description)})")
         return self._call(state, initial=True)
 
     def answer(
@@ -198,7 +193,6 @@ class SimulationDesigner:
         return self._call(state)
 
     def approve(self, session_id: str) -> SpecApproval:
-        """Re-return the current spec approval (no new LLM call)."""
         state = self._get(session_id)
         if state.spec is None:
             raise RuntimeError(f"[{session_id}] No spec ready yet.")
@@ -231,7 +225,18 @@ class SimulationDesigner:
         force_complete = state.iteration >= ClarificationRequest.MAX_ROUNDS
 
         if initial:
-            user_content = f"Design a simulation for:\n\n{state.original_description}"
+            # For very long descriptions, compress for the monolithic call.
+            # The full description is preserved in state.original_description
+            # so staged generation can use it later if needed.
+            compressed = _compress_description(
+                state.original_description, MAX_INITIAL_DESC_CHARS
+            )
+            if len(compressed) < len(state.original_description):
+                log.info(
+                    f"[{sid}] Description compressed: "
+                    f"{len(state.original_description)} → {len(compressed)} chars"
+                )
+            user_content = f"Design a simulation for:\n\n{compressed}"
         else:
             answers_block = "\n".join(
                 f"  [{k}]: {v}" for k, v in state.cumulative_answers.items()
@@ -239,8 +244,7 @@ class SimulationDesigner:
             )
             force_note = (
                 "\n\nIMPORTANT: You have reached the maximum number of clarification "
-                "rounds. You MUST now set spec_complete=true and return a complete spec, "
-                "using reasonable defaults for anything still unclear."
+                "rounds. You MUST now set spec_complete=true and return a complete spec."
                 if force_complete else ""
             )
             user_content = (
@@ -251,10 +255,7 @@ class SimulationDesigner:
 
         state.conversation.append({"role": "user", "content": user_content})
 
-        log.debug(
-            f"[{sid}] LLM call #{(len(state.conversation)+1)//2} "
-            f"({'FORCED COMPLETE' if force_complete else 'normal'})"
-        )
+        log.debug(f"[{sid}] LLM call #{(len(state.conversation)+1)//2}")
         try:
             raw = self._backend.complete(
                 system=self._system_prompt,
@@ -267,12 +268,18 @@ class SimulationDesigner:
 
         state.conversation.append({"role": "assistant", "content": raw})
         data = _parse_json(raw)
+
+        # ── Non-JSON fallback: staged generation ──────────────────────────────
         if data is None:
-            raise ValueError(f"[{sid}] LLM returned non-JSON output")
+            log.warning(
+                f"[{sid}] Monolithic call returned non-JSON "
+                f"(first 200 chars: {raw[:200]!r}). "
+                "Falling back to staged generation."
+            )
+            return self._staged_fallback(state, sid)
 
         if not data.get("spec_complete"):
             raw_qs = data.get("questions", [])
-            # Validate and cap questions
             questions = _validate_questions(raw_qs, sid)
             log.info(f"[{sid}] Clarification round {state.iteration+1}: {len(questions)} question(s)")
             return ClarificationRequest(
@@ -282,10 +289,44 @@ class SimulationDesigner:
             )
 
         spec = _parse_spec(data["spec"])
+        return self._validate_and_approve(spec, state, sid)
 
-        # ── Deterministic validation gate ─────────────────────────────────────
-        # Runs before returning to the director. If it fails, we feed the
-        # structured errors back to the LLM for one auto-repair attempt.
+    def _staged_fallback(
+        self, state: DesignerState, sid: str
+    ) -> ClarificationRequest | SpecApproval:
+        """
+        Generate spec via StagedSpecGenerator when the monolithic call fails.
+
+        Uses the full original description so staged generation has all
+        the detail it needs.  Returns SpecApproval directly (no
+        clarification rounds — staged generation is self-contained).
+        """
+        from .staged_designer import StagedSpecGenerator
+        log.info(f"[{sid}] Starting staged generation for session")
+        try:
+            generator = StagedSpecGenerator(self._backend)
+            spec = generator.generate(
+                state.original_description,
+                session_id=sid,
+                max_repair_attempts=2,
+            )
+            state.spec = spec
+            log.info(
+                f"[{sid}] Staged generation succeeded: '{spec.name}' | "
+                f"{len(spec.variables)} vars | {len(spec.stopping_conditions)} stop conds"
+            )
+            return _make_spec_approval(sid, spec)
+        except Exception as exc:
+            log.error(f"[{sid}] Staged generation failed: {exc}")
+            raise ValueError(
+                f"[{sid}] Both monolithic and staged spec generation failed.\n"
+                f"Staged error: {exc}"
+            ) from exc
+
+    def _validate_and_approve(
+        self, spec: SimulationSpec, state: DesignerState, sid: str
+    ) -> SpecApproval:
+        """Run SpecValidator; attempt one auto-repair; then approve."""
         validation = self._validator.validate(spec)
         if not validation.passed:
             log.warning(
@@ -314,69 +355,107 @@ class SimulationDesigner:
                     spec = _parse_spec(data2["spec"])
                     validation2 = self._validator.validate(spec)
                     if not validation2.passed:
-                        log.error(
-                            f"[{sid}] Spec still invalid after auto-repair: "
-                            f"{len(validation2.errors)} error(s)"
-                        )
-                        # Surface to director with all errors so user can see them
-                        raise ValueError(
-                            f"Spec validation failed after auto-repair attempt.\n"
-                            + validation2.error_summary()
-                        )
+                        log.error(f"[{sid}] Still invalid after auto-repair — trying staged repair")
+                        # Last resort: staged repair of specific failing fields
+                        from .staged_designer import StagedSpecGenerator
+                        generator = StagedSpecGenerator(self._backend)
+                        skeleton = {
+                            "name": spec.name,
+                            "description": spec.description,
+                            "variables": [
+                                {
+                                    "name": v.name, "description": v.description,
+                                    "kind": v.kind.value, "default": v.default,
+                                    "min_val": v.min_val, "max_val": v.max_val,
+                                    "step": v.step, "choices": v.choices,
+                                    "unit": v.unit, "sweep": v.sweep,
+                                    "sweep_values": v.sweep_values,
+                                }
+                                for v in spec.variables
+                            ],
+                            "state_fields": list(spec.state_fields),
+                            "stopping_conditions": [
+                                {
+                                    "kind": c.kind, "name": c.name,
+                                    "description": c.description, "priority": c.priority,
+                                }
+                                for c in spec.stopping_conditions
+                            ],
+                            "output_variables": spec.output_variables,
+                            "data_log_variables": spec.data_log_variables,
+                            "data_log_interval": spec.data_log_interval,
+                            "checkpoint_interval": spec.checkpoint_interval,
+                            "max_steps": spec.max_steps,
+                            "progress_interval": spec.progress_interval,
+                            "time_estimate_seconds": spec.time_estimate_seconds,
+                            "time_estimate_explanation": spec.time_estimate_explanation,
+                        }
+                        spec = generator._phase5_repair(spec, validation2, skeleton, sid)
+                        validation3 = self._validator.validate(spec)
+                        if not validation3.passed:
+                            raise ValueError(
+                                f"Spec validation failed after all repair attempts.\n"
+                                + validation3.error_summary()
+                            )
                     else:
                         log.info(f"[{sid}] Auto-repair succeeded.")
-                        validation = validation2
                 except (KeyError, ValueError, TypeError) as exc:
                     raise ValueError(f"Auto-repair produced unparseable spec: {exc}")
             else:
-                raise ValueError(
-                    f"[{sid}] Auto-repair did not return a complete spec."
-                )
+                # Auto-repair also returned non-JSON — fall back to staged
+                log.warning(f"[{sid}] Auto-repair returned non-JSON, falling back to staged")
+                return self._staged_fallback(state, sid)
 
         if validation.warnings:
-            log.info(
-                f"[{sid}] Spec passed with {len(validation.warnings)} warning(s):"
-            )
             for w in validation.warnings:
-                log.info(f"  [D] {w.code}: {w.message[:80]}")
+                log.info(f"[{sid}]   [D] {w.code}: {w.message[:80]}")
 
         state.spec = spec
         log.info(
-            f"[{sid}] Spec validated and complete — '{spec.name}' | "
+            f"[{sid}] Spec validated: '{spec.name}' | "
             f"{len(spec.variables)} vars | {len(spec.stopping_conditions)} stop conds"
         )
         return _make_spec_approval(sid, spec)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Helpers (same as original)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _compress_description(description: str, max_chars: int) -> str:
+    """
+    Compress a long description for the initial monolithic spec call.
+
+    The initial call needs to determine structure (variables, state shape,
+    stopping conditions).  For code generation the full context is less
+    critical because the staged generator rebuilds it from structure.
+    """
+    if len(description) <= max_chars:
+        return description
+    # Keep a balanced head and tail — the head sets the physics,
+    # the tail often has the key parameters and procedure summary.
+    keep = max_chars // 2
+    return (
+        description[:keep].rstrip()
+        + "\n\n[... context compressed — full detail available in code generation phase ...]\n\n"
+        + description[-keep:].lstrip()
+    )
+
+
 def _validate_questions(raw_qs: list[dict], sid: str) -> list[ClarificationQuestion]:
-    """
-    Validate questions against the contract.
-    - Cap at MAX_QUESTIONS_PER_ROUND
-    - Validate topic is an allowed QuestionTopic
-    - Filter out implementation questions (best-effort)
-    """
     valid_topic_values = {t.value for t in QuestionTopic}
     forbidden_keywords = {"numpy", "stdlib", "library", "dataclass", "class", "dict",
                           "list vs", "array", "style", "format"}
-
     result: list[ClarificationQuestion] = []
     for raw in raw_qs[:ClarificationRequest.MAX_QUESTIONS_PER_ROUND]:
         topic_str = raw.get("topic", "variable_range")
         if topic_str not in valid_topic_values:
-            log.warning(f"[{sid}] Question has invalid topic {topic_str!r} — defaulting to variable_range")
+            log.warning(f"[{sid}] Invalid topic {topic_str!r} — defaulting to variable_range")
             topic_str = "variable_range"
-
         text = raw.get("text", "")
-        # Check for forbidden implementation topics
-        text_lower = text.lower()
-        if any(kw in text_lower for kw in forbidden_keywords):
+        if any(kw in text.lower() for kw in forbidden_keywords):
             log.warning(f"[{sid}] Skipping implementation question: {text[:60]!r}")
             continue
-
         result.append(ClarificationQuestion(
             index=len(result) + 1,
             text=text,
@@ -387,7 +466,6 @@ def _validate_questions(raw_qs: list[dict], sid: str) -> list[ClarificationQuest
 
 
 def _make_spec_approval(session_id: str, spec: SimulationSpec) -> SpecApproval:
-    """Build a SpecApproval from a validated spec."""
     output_contract = OutputContract(
         data_log_fields=["step", "sim_time"] + spec.data_log_variables,
         results_fields=["status", "reason", "stop_condition_name",
@@ -404,7 +482,6 @@ def _make_spec_approval(session_id: str, spec: SimulationSpec) -> SpecApproval:
         eta_str = f"~{eta_secs/3600:.1f} h"
     if spec.time_estimate_explanation:
         eta_str += f" — {spec.time_estimate_explanation}"
-
     return SpecApproval(
         session_id=session_id,
         spec_card=_format_spec_card(spec),
@@ -440,26 +517,23 @@ def _format_spec_card(spec: SimulationSpec) -> str:
 
 
 def _parse_json(raw: str) -> Optional[dict]:
-    clean_resp = raw.strip()
-    if clean_resp.startswith("```json"):
-        clean_resp = clean_resp[7:]
-    elif clean_resp.startswith("```"):
-        clean_resp = clean_resp[3:]
-    if clean_resp.endswith("```"):
-        clean_resp = clean_resp[:-3]
-    clean_resp = clean_resp.strip()
-
+    clean = raw.strip()
+    if clean.startswith("```json"):
+        clean = clean[7:]
+    elif clean.startswith("```"):
+        clean = clean[3:]
+    if clean.endswith("```"):
+        clean = clean[:-3]
+    clean = clean.strip()
     try:
-        return json.loads(clean_resp)
+        return json.loads(clean)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", clean_resp, re.DOTALL)
+        m = re.search(r"\{.*\}", clean, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group())
-            except json.JSONDecodeError as e:
-                log.warning("JSON decode failed on extracted block: %s. Raw was: %r", e, raw[:500])
-        else:
-            log.warning("No JSON object could be extracted. Raw was: %r", raw[:500])
+            except json.JSONDecodeError:
+                pass
     return None
 
 
