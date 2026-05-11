@@ -83,7 +83,6 @@ class PerplexityBackend(SearchBackend):
                 {"role": "user", "content": user_msg},
             ],
             "temperature": 0.0,
-            "max_tokens": 4096,
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",

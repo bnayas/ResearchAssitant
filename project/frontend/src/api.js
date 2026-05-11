@@ -124,7 +124,7 @@ export async function simStatus(sessionId) {
   return get(`/api/simulations/${sessionId}/status`);
 }
 
-export async function simWait(sessionId, timeoutSeconds = 30) {
+export async function simWait(sessionId, timeoutSeconds = 300) {
   return post(`/api/simulations/${sessionId}/wait`, { timeoutSeconds });
 }
 

@@ -361,7 +361,6 @@ class MathAgentService:
                 ),
                 messages=[{"role": "user", "content": f"mode={mode}\nquestion={text}"}],
                 temperature=0.0,
-                max_tokens=512,
             )
         except Exception:
             return None

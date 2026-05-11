@@ -238,6 +238,14 @@ class SimulationDesigner:
                 )
             user_content = f"Design a simulation for:\n\n{compressed}"
         else:
+            request_text = _compress_description(
+                state.original_description, MAX_INITIAL_DESC_CHARS
+            )
+            if len(request_text) < len(state.original_description):
+                log.info(
+                    f"[{sid}] Follow-up context compressed: "
+                    f"{len(state.original_description)} → {len(request_text)} chars"
+                )
             answers_block = "\n".join(
                 f"  [{k}]: {v}" for k, v in state.cumulative_answers.items()
                 if not k.startswith("_")
@@ -248,7 +256,7 @@ class SimulationDesigner:
                 if force_complete else ""
             )
             user_content = (
-                f"Original request:\n{state.original_description}\n\n"
+                f"Original request:\n{request_text}\n\n"
                 f"Answers so far:\n{answers_block}"
                 + force_note
             )
@@ -260,11 +268,10 @@ class SimulationDesigner:
             raw = self._backend.complete(
                 system=self._system_prompt,
                 messages=state.conversation,
-                max_tokens=4096,
             )
         except Exception as exc:
-            log.error(f"[{sid}] LLM error: {exc}")
-            raise
+            log.error(f"[{sid}] LLM error: {exc}; falling back to staged generation")
+            return self._staged_fallback(state, sid)
 
         state.conversation.append({"role": "assistant", "content": raw})
         data = _parse_json(raw)
@@ -343,11 +350,10 @@ class SimulationDesigner:
                 raw2 = self._backend.complete(
                     system=self._system_prompt,
                     messages=state.conversation,
-                    max_tokens=4096,
                 )
             except Exception as exc:
-                log.error(f"[{sid}] Auto-repair LLM call failed: {exc}")
-                raise
+                log.error(f"[{sid}] Auto-repair LLM call failed: {exc}; falling back to staged generation")
+                return self._staged_fallback(state, sid)
             state.conversation.append({"role": "assistant", "content": raw2})
             data2 = _parse_json(raw2)
             if data2 and data2.get("spec_complete") and data2.get("spec"):
@@ -393,10 +399,13 @@ class SimulationDesigner:
                         spec = generator._phase5_repair(spec, validation2, skeleton, sid)
                         validation3 = self._validator.validate(spec)
                         if not validation3.passed:
-                            raise ValueError(
-                                f"Spec validation failed after all repair attempts.\n"
-                                + validation3.error_summary()
-                            )
+                            spec = _apply_deterministic_repairs(spec, validation3, sid)
+                            validation3 = self._validator.validate(spec)
+                            if not validation3.passed:
+                                raise ValueError(
+                                    f"Spec validation failed after all repair attempts.\n"
+                                    + validation3.error_summary()
+                                )
                     else:
                         log.info(f"[{sid}] Auto-repair succeeded.")
                 except (KeyError, ValueError, TypeError) as exc:
@@ -421,6 +430,252 @@ class SimulationDesigner:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers (same as original)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _apply_deterministic_repairs(
+    spec: SimulationSpec, validation: ValidationResult, sid: str
+) -> SimulationSpec:
+    """Fix validator-contract issues that do not require scientific judgment."""
+    error_codes = {err.code for err in validation.errors}
+    state_field_names = [name for name, *_ in spec.state_fields]
+    state_field_set = set(state_field_names)
+
+    def valid_state_refs(names: list[str]) -> list[str]:
+        out: list[str] = []
+        for name in names or []:
+            if name in state_field_set or name in {"step", "sim_time"}:
+                if name not in out:
+                    out.append(name)
+        return out
+
+    def preferred_refs() -> list[str]:
+        preferred = [
+            "current_generation",
+            "generation",
+            "species_counts",
+            "population",
+            "counts",
+            "environmental_state",
+        ]
+        out = [name for name in preferred if name in state_field_set]
+        if not out:
+            out = state_field_names[:3]
+        return out
+
+    changed: list[str] = []
+
+    if "missing_field" in error_codes and not spec.variables:
+        spec.variables = _reconstruct_variables_from_spec(spec)
+        changed.append("variables")
+
+    if (
+        "undefined_data_log_variable" in error_codes
+        or "empty_data_log_variables" in error_codes
+        or not spec.data_log_variables
+    ):
+        repaired = valid_state_refs(spec.data_log_variables)
+        if not repaired:
+            repaired = preferred_refs()
+        if repaired != spec.data_log_variables:
+            spec.data_log_variables = repaired
+            changed.append("data_log_variables")
+
+    if (
+        "undefined_output_variable" in error_codes
+        or "empty_output_variables" in {w.code for w in validation.warnings}
+        or not spec.output_variables
+    ):
+        repaired = valid_state_refs(spec.output_variables)
+        if not repaired:
+            repaired = preferred_refs()
+        if repaired != spec.output_variables:
+            spec.output_variables = repaired
+            changed.append("output_variables")
+
+    if "no_failure_condition" in error_codes:
+        if "_sim_tool_invalid_value" not in spec.setup_code:
+            spec.setup_code = (
+                spec.setup_code.rstrip()
+                + "\n\n"
+                + "def _sim_tool_invalid_value(value):\n"
+                + "    if isinstance(value, float):\n"
+                + "        return math.isnan(value) or math.isinf(value)\n"
+                + "    if isinstance(value, (list, tuple)):\n"
+                + "        return any(_sim_tool_invalid_value(v) for v in value[:10000])\n"
+                + "    if isinstance(value, dict):\n"
+                + "        return any(_sim_tool_invalid_value(v) for v in value.values())\n"
+                + "    return False\n"
+            )
+        spec.stopping_conditions.append(
+            StoppingCondition(
+                kind="failure",
+                name="invalid_state_detected",
+                description="Stop if any tracked state value becomes NaN or infinite.",
+                check_expr=(
+                    "any(_sim_tool_invalid_value(v) for v in vars(state).values())"
+                ),
+                reason_expr='"invalid or non-finite state detected"',
+                save_on_trigger=True,
+                priority=10_000,
+            )
+        )
+        changed.append("stopping_conditions")
+
+    if changed:
+        log.info(f"[{sid}] Applied deterministic spec repairs: {', '.join(changed)}")
+    return spec
+
+
+_CONFIG_REF_RE = re.compile(r"\bconfig\.([A-Za-z_][A-Za-z0-9_]*)")
+_BUILTIN_CONFIG_FIELDS = {
+    "max_steps",
+    "checkpoint_interval",
+    "progress_interval",
+    "data_log_interval",
+}
+
+
+def _reconstruct_variables_from_spec(spec: SimulationSpec) -> list[Variable]:
+    """Recover a minimal SimConfig contract when an LLM repair drops variables."""
+    code_blocks = "\n".join(
+        [
+            spec.precompute_code or "",
+            spec.initial_state_code or "",
+            spec.step_code or "",
+            spec.progress_code or "",
+            spec.config_assert_code or "",
+            spec.state_assert_code or "",
+            " ".join(sc.check_expr or "" for sc in spec.stopping_conditions),
+            " ".join(sc.reason_expr or "" for sc in spec.stopping_conditions),
+        ]
+    )
+    names = [
+        name
+        for name in sorted(set(_CONFIG_REF_RE.findall(code_blocks)))
+        if name not in _BUILTIN_CONFIG_FIELDS
+    ]
+    if not names:
+        names = [
+            "population_size",
+            "mutation_rate",
+            "delta",
+            "gamma",
+            "initial_species_count",
+            "burn_in_generations",
+            "sample_interval",
+        ]
+    return [_default_variable_for_name(name) for name in names]
+
+
+def _default_variable_for_name(name: str) -> Variable:
+    lname = name.lower()
+    if lname in {"n", "population_size", "n_individuals", "community_size"}:
+        return Variable(
+            name=name,
+            description="Community size N.",
+            kind=VariableKind.INT,
+            default=10_000,
+            min_val=100,
+            max_val=100_000,
+            step=1_000,
+        )
+    if lname in {"nu", "mutation_rate", "speciation_rate"}:
+        return Variable(
+            name=name,
+            description="Per-elementary-event mutation/speciation probability.",
+            kind=VariableKind.FLOAT,
+            default=0.01,
+            min_val=0.0,
+            max_val=1.0,
+            step=0.001,
+        )
+    if lname in {"theta", "varpi", "biodiversity_number"}:
+        return Variable(
+            name=name,
+            description="Fundamental biodiversity number theta=N*nu.",
+            kind=VariableKind.FLOAT,
+            default=100.0,
+            min_val=0.0,
+            max_val=10_000.0,
+            step=10.0,
+        )
+    if lname in {"delta", "environment_correlation_time", "correlation_time"}:
+        return Variable(
+            name=name,
+            description="Environmental correlation time measured in generations.",
+            kind=VariableKind.FLOAT,
+            default=0.5,
+            min_val=0.01,
+            max_val=10.0,
+            step=0.05,
+        )
+    if lname in {"gamma", "fitness_amplitude"}:
+        return Variable(
+            name=name,
+            description="Amplitude of dichotomous fitness fluctuations.",
+            kind=VariableKind.FLOAT,
+            default=0.5,
+            min_val=0.0,
+            max_val=2.0,
+            step=0.05,
+        )
+    if "model" in lname:
+        return Variable(
+            name=name,
+            description="Neutral dynamics model variant.",
+            kind=VariableKind.CHOICE,
+            default="model_a",
+            choices=["model_a", "model_b"],
+        )
+    if lname in {"initial_species_count", "num_species", "s0", "species_count"}:
+        return Variable(
+            name=name,
+            description="Initial number of species before burn-in.",
+            kind=VariableKind.INT,
+            default=200,
+            min_val=2,
+            max_val=10_000,
+            step=10,
+        )
+    if "burn" in lname:
+        return Variable(
+            name=name,
+            description="Burn-in duration in generations.",
+            kind=VariableKind.INT,
+            default=4_000,
+            min_val=0,
+            max_val=100_000,
+            step=500,
+        )
+    if "sample" in lname or "interval" in lname:
+        return Variable(
+            name=name,
+            description="Sampling interval in generations.",
+            kind=VariableKind.INT,
+            default=100,
+            min_val=1,
+            max_val=10_000,
+            step=10,
+        )
+    if "seed" in lname:
+        return Variable(
+            name=name,
+            description="Random seed.",
+            kind=VariableKind.INT,
+            default=0,
+            min_val=0,
+            max_val=1_000_000,
+            step=1,
+        )
+    return Variable(
+        name=name,
+        description=f"Recovered configuration parameter '{name}'.",
+        kind=VariableKind.FLOAT,
+        default=1.0,
+        min_val=None,
+        max_val=None,
+        step=None,
+    )
+
 
 def _compress_description(description: str, max_chars: int) -> str:
     """
@@ -525,37 +780,64 @@ def _parse_json(raw: str) -> Optional[dict]:
     if clean.endswith("```"):
         clean = clean[:-3]
     clean = clean.strip()
-    try:
-        return json.loads(clean)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", clean, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
+    parsed = _loads_json_lenient(clean)
+    if parsed is not None:
+        return parsed
+    m = re.search(r"\{.*\}", clean, re.DOTALL)
+    if m:
+        return _loads_json_lenient(m.group())
     return None
+
+
+def _loads_json_lenient(text: str) -> Optional[dict]:
+    """Parse JSON, repairing common LLM mistakes that preserve intent."""
+    latex_repaired = _repair_latex_escapes(text)
+    if latex_repaired != text:
+        try:
+            data = json.loads(latex_repaired)
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError:
+            pass
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        repaired = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", text)
+        if repaired == text:
+            return None
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError:
+            return None
+    return data if isinstance(data, dict) else None
+
+
+_LATEX_COMMAND_RE = re.compile(
+    r"\\(?=("
+    r"alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|"
+    r"iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|upsilon|phi|varphi|"
+    r"chi|psi|omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega|"
+    r"frac|sqrt|left|right|cdot|times|pm|leq|geq|neq"
+    r")\b)"
+)
+
+
+def _repair_latex_escapes(text: str) -> str:
+    """Escape common LaTeX commands that LLMs put inside JSON strings."""
+    return _LATEX_COMMAND_RE.sub(r"\\\\", text)
 
 
 def _parse_spec(data: dict) -> SimulationSpec:
     variables = [
-        Variable(
-            name=v["name"], description=v["description"],
-            kind=VariableKind(v["kind"]), default=v["default"],
-            min_val=v.get("min_val"), max_val=v.get("max_val"),
-            step=v.get("step"), choices=v.get("choices"),
-            unit=v.get("unit"), sweep=v.get("sweep", False),
-            sweep_values=v.get("sweep_values"),
-        )
-        for v in data["variables"]
+        variable
+        for index, raw in enumerate(data["variables"], 1)
+        if (variable := _parse_variable(raw, index)) is not None
     ]
     stopping_conditions = sorted(
-        [StoppingCondition(
-            kind=s["kind"], name=s["name"], description=s["description"],
-            check_expr=s["check_expr"], reason_expr=s["reason_expr"],
-            save_on_trigger=s.get("save_on_trigger", True),
-            priority=s.get("priority", 0),
-        ) for s in data["stopping_conditions"]],
+        [
+            condition
+            for index, raw in enumerate(data["stopping_conditions"], 1)
+            if (condition := _parse_stopping_condition(raw, index)) is not None
+        ],
         key=lambda s: -s.priority,
     )
     return SimulationSpec(
@@ -578,3 +860,87 @@ def _parse_spec(data: dict) -> SimulationSpec:
         time_estimate_seconds=float(data.get("time_estimate_seconds", 0)),
         time_estimate_explanation=data.get("time_estimate_explanation", ""),
     )
+
+
+def _parse_variable(raw: object, index: int) -> Variable | None:
+    if isinstance(raw, dict):
+        payload = raw
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+        if not values:
+            return None
+        payload = {
+            "name": values[0],
+            "description": values[1] if len(values) > 1 else "",
+            "kind": values[2] if len(values) > 2 else _infer_variable_kind(values[3] if len(values) > 3 else None),
+            "default": values[3] if len(values) > 3 else None,
+        }
+        if len(values) > 4:
+            payload["min_val"] = values[4]
+        if len(values) > 5:
+            payload["max_val"] = values[5]
+        if len(values) > 6:
+            payload["step"] = values[6]
+    else:
+        return None
+
+    name = str(payload.get("name") or f"variable_{index}").strip()
+    if not name:
+        return None
+    kind = str(payload.get("kind") or _infer_variable_kind(payload.get("default"))).strip().lower()
+    try:
+        variable_kind = VariableKind(kind)
+    except ValueError:
+        variable_kind = VariableKind(_infer_variable_kind(payload.get("default")))
+    return Variable(
+        name=name,
+        description=str(payload.get("description") or name).strip(),
+        kind=variable_kind,
+        default=payload.get("default"),
+        min_val=payload.get("min_val"),
+        max_val=payload.get("max_val"),
+        step=payload.get("step"),
+        choices=payload.get("choices") if isinstance(payload.get("choices"), list) else None,
+        unit=payload.get("unit"),
+        sweep=bool(payload.get("sweep", False)),
+        sweep_values=payload.get("sweep_values") if isinstance(payload.get("sweep_values"), list) else None,
+    )
+
+
+def _parse_stopping_condition(raw: object, index: int) -> StoppingCondition | None:
+    if isinstance(raw, dict):
+        payload = raw
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+        if len(values) < 3:
+            return None
+        payload = {
+            "kind": values[0],
+            "name": values[1],
+            "description": values[2],
+            "check_expr": values[3] if len(values) > 3 else "False",
+            "reason_expr": values[4] if len(values) > 4 else repr(str(values[2])),
+        }
+    else:
+        return None
+    return StoppingCondition(
+        kind=str(payload.get("kind") or "success"),
+        name=str(payload.get("name") or f"condition_{index}"),
+        description=str(payload.get("description") or ""),
+        check_expr=str(payload.get("check_expr") or "False"),
+        reason_expr=str(payload.get("reason_expr") or repr(str(payload.get("description") or ""))),
+        save_on_trigger=bool(payload.get("save_on_trigger", True)),
+        priority=int(payload.get("priority", 0) or 0),
+    )
+
+
+def _infer_variable_kind(value: object) -> str:
+    if isinstance(value, bool):
+        return VariableKind.BOOL.value
+    if isinstance(value, int):
+        return VariableKind.INT.value
+    if isinstance(value, float):
+        return VariableKind.FLOAT.value
+    if isinstance(value, str):
+        return VariableKind.STRING.value
+    return VariableKind.FLOAT.value

@@ -100,12 +100,14 @@ class LocalLiteratureAssistant:
                 selected_query = candidate
                 break
             diagnostics = getattr(parser, "last_search_diagnostics", {})
-            if diagnostics.get("all_rate_limited"):
-                attempted_backends = ", ".join(diagnostics.get("attempted_backends") or []) or "the configured backends"
+            if diagnostics.get("all_rate_limited") or diagnostics.get("all_temporarily_blocked"):
+                rate_limited = ", ".join(diagnostics.get("rate_limited_backends") or []) or "none"
+                unavailable = ", ".join(diagnostics.get("unavailable_backends") or []) or "none"
                 raise AssistantExecutionError(
-                    "Primary article lookup is temporarily rate-limited across all configured backends. "
+                    "Primary article lookup is temporarily blocked across all configured backends. "
                     "The workflow stopped retrying to avoid flooding them.\n"
-                    f"Backends in cooldown: {attempted_backends}"
+                    f"Rate-limited backends: {rate_limited}\n"
+                    f"Temporarily unavailable backends: {unavailable}"
                 )
 
         if paper is None:
@@ -155,8 +157,9 @@ class LocalLiteratureAssistant:
         questions = [
             "What is the detailed description of the primary simulation model (equations, dynamics)? If there are multiple distinct models, list them and state 'MULTIPLE_MODELS'.",
             (
-                "List the distinct simulation targets or model variants that can be reproduced from this article. "
-                "Return a JSON array of objects with name and description fields. Return [] if there is only one target."
+                "List unresolved downstream inquiries that materially affect reproduction or interpretation. "
+                "Return a JSON array of objects with id, kind, question, reason, applies_to, blocking, and options fields. "
+                "Use options with label, description, and value for selection inquiries. Return [] if no explicit inquiry is needed."
             ),
             "What are the key parameters and their values? Provide a JSON object mapping parameter names to values.",
             "What is the step-by-step simulation algorithm procedure (e.g., Gillespie, Euler)?",
@@ -182,15 +185,12 @@ class LocalLiteratureAssistant:
                 "Diagnostic comparison between reproduced and reported results",
             ],
         )
-        simulation_targets = self._coerce_simulation_targets(
-            answers.get(questions[1], ""),
-            model_description=model_description,
-        )
+        inquiries = self._coerce_inquiries(answers.get(questions[1], ""))
         payload = {
             "article_artifact_id": article.artifact_id,
             "article_title": article.metadata.get("title", ""),
             "model_description": model_description,
-            "simulation_targets": simulation_targets,
+            "inquiries": inquiries,
             "key_parameters": params,
             "procedure": procedure,
             "expected_figures": expected_figures,
@@ -198,10 +198,10 @@ class LocalLiteratureAssistant:
         summary_md = (
             f"# Article Brief\n\n"
             f"## Model\n{model_description}\n\n"
-            f"## Simulation Targets\n"
+            f"## Inquiries\n"
             + "\n".join(
-                f"- **{target.get('name', 'Target')}**: {target.get('description', '')}"
-                for target in simulation_targets
+                f"- **{inquiry.get('id', 'inquiry')}**: {inquiry.get('question', '')}"
+                for inquiry in inquiries
             )
             + "\n\n"
             f"## Procedure\n{procedure}\n\n"
@@ -236,16 +236,22 @@ class LocalLiteratureAssistant:
         task: TaskEnvelope,
         article: ArtifactRef,
         brief: ArtifactRef,
+        stream_callback: Any = None,
     ) -> ArtifactRef:
-        bridge = build_literature_review_bridge_from_env(llm_sync_backend=self._llm)
+        bridge = build_literature_review_bridge_from_env(
+            llm_sync_backend=self._llm,
+            gui_event_sink=stream_callback,
+        )
         query = str(brief.metadata.get("model_description") or article.metadata.get("title") or task.instructions)
         include_topics = [
             topic.strip()
             for topic in str(task.metadata.get("topic_hint") or "").split(",")
             if topic.strip()
         ]
-        if not include_topics:
-            include_topics = [query]
+        include_topics.extend(self._compact_literature_topics(query, article))
+        include_topics = list(dict.fromkeys(topic for topic in include_topics if topic))[:10]
+        authors = self._author_surnames(article.metadata.get("authors") or [])
+        anchor_year = self._coerce_int(article.metadata.get("year"))
         review_task = LiteratureReviewTask(
             task_id=f"{task.task_id}-lit",
             branch_id=task.directive_id,
@@ -254,11 +260,13 @@ class LocalLiteratureAssistant:
                 include_topics=include_topics,
                 year_min=task.metadata.get("year_min"),
                 year_max=task.metadata.get("year_max"),
+                anchor_year=anchor_year,
+                required_authors=authors[:3],
                 max_papers=int(task.metadata.get("max_papers", 5)),
             ),
             depth=SearchDepthConfig(
-                max_rounds=int(task.metadata.get("max_rounds", 2)),
-                max_term_variations=int(task.metadata.get("max_term_variations", 1)),
+                max_rounds=int(task.metadata.get("max_rounds", 4)),
+                max_term_variations=int(task.metadata.get("max_term_variations", 2)),
                 min_papers_threshold=int(task.metadata.get("min_papers_threshold", 2)),
                 papers_per_query=int(task.metadata.get("papers_per_query", 5)),
             ),
@@ -270,13 +278,14 @@ class LocalLiteratureAssistant:
             "audit": jsonify(result.audit),
         }
         synthesis = result.artifact.synthesis
+        search_summary = self._format_literature_search_summary(result.artifact)
         self._registry.save_text(
             assistant=AssistantId.LITERATURE_REVIEWER.value,
             kind="literature_synthesis_markdown",
             title="Literature Synthesis",
             filename="literature/literature_synthesis.md",
-            text=f"# Literature Synthesis\n\n{synthesis}\n",
-            summary=truncate(synthesis),
+            text=f"# Literature Synthesis\n\n{search_summary}\n\n{synthesis}\n",
+            summary=truncate(search_summary),
             metadata={
                 "accepted_count": result.artifact.accepted_count,
                 "audit_passed": result.audit.passed,
@@ -289,13 +298,17 @@ class LocalLiteratureAssistant:
             title="Related Literature Review",
             filename="literature/literature_review.json",
             payload=artifact_payload,
-            summary=f"{result.artifact.accepted_count} accepted paper(s)",
+            summary=search_summary,
             metadata={
                 "accepted_count": result.artifact.accepted_count,
                 "removed_count": result.artifact.removed_count,
                 "status": result.artifact.status,
                 "audit_passed": result.audit.passed,
                 "synthesis": synthesis,
+                "search_log": jsonify(result.artifact.search_log),
+                "include_topics": include_topics,
+                "required_authors": authors[:3],
+                "anchor_year": anchor_year,
             },
             artifact_id="literature-review",
         )
@@ -321,6 +334,79 @@ class LocalLiteratureAssistant:
         if not notes:
             return "(none)"
         return "\n".join(f"- {note}" for note in notes)
+
+    @staticmethod
+    def _compact_literature_topics(query: str, article: ArtifactRef) -> list[str]:
+        text = " ".join([
+            str(article.metadata.get("title") or article.title or ""),
+            str(article.metadata.get("abstract") or ""),
+            query,
+        ]).lower()
+        candidates = [
+            "time-averaged neutral dynamics",
+            "time-average neutral model",
+            "time averaged neutral model",
+            "environmental stochasticity",
+            "environmental noise",
+            "neutral theory of biodiversity",
+            "neutral dynamics",
+            "neutral model",
+            "demographic noise",
+            "storage effect",
+            "species abundance distribution",
+            "species richness",
+            "biodiversity",
+        ]
+        topics = [candidate for candidate in candidates if candidate in text]
+        if "neutral" in text and not any("neutral" in topic for topic in topics):
+            topics.append("neutral model")
+        if "stochastic" in text and not any("stochastic" in topic for topic in topics):
+            topics.append("environmental stochasticity")
+        return topics or [str(article.metadata.get("title") or article.title or query)[:80]]
+
+    @staticmethod
+    def _author_surnames(raw_authors: Any) -> list[str]:
+        if isinstance(raw_authors, str):
+            raw_items = [item.strip() for item in raw_authors.split(",") if item.strip()]
+        elif isinstance(raw_authors, list):
+            raw_items = [str(item).strip() for item in raw_authors if str(item).strip()]
+        else:
+            raw_items = []
+        surnames: list[str] = []
+        for author in raw_items:
+            surname = author.split(",", 1)[0].strip() if "," in author else author.split()[-1].strip()
+            if surname and surname.lower() not in {item.lower() for item in surnames}:
+                surnames.append(surname)
+        return surnames
+
+    @staticmethod
+    def _coerce_int(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None and str(value).strip() else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_literature_search_summary(artifact: Any) -> str:
+        lines = [
+            f"{artifact.accepted_count} accepted paper(s); {artifact.removed_count} removed; status={artifact.status}."
+        ]
+        for round_info in artifact.search_log:
+            lines.append(
+                "Round "
+                f"{round_info.round_number}: raw={round_info.papers_found_raw}, "
+                f"in_scope={round_info.papers_in_scope}, "
+                f"sources={', '.join(round_info.sources_queried) or 'none'}, "
+                f"keywords={round_info.keyword_sets}"
+            )
+        if artifact.removed_papers:
+            lines.append("First removed candidates:")
+            for paper in artifact.removed_papers[:5]:
+                lines.append(
+                    f"- {paper.title} ({paper.year or '?'}) [{paper.source}]: "
+                    f"{paper.scope_violation_reason or 'out of scope'}"
+                )
+        return "\n".join(lines)
 
     @staticmethod
     def _coerce_lookup_query(response: str, *, fallback: str) -> str:
@@ -637,16 +723,32 @@ class LocalLiteratureAssistant:
         return [item.strip(" -") for item in re.split(r"[\n;]+", text) if item.strip()]
 
     @staticmethod
-    def _coerce_simulation_targets(raw: Any, *, model_description: str) -> list[dict[str, str]]:
+    def _coerce_inquiries(raw: Any) -> list[dict[str, Any]]:
         if isinstance(raw, list):
-            return [
-                {
-                    "name": str(item.get("name") or item.get("title") or f"Target {index}").strip(),
-                    "description": str(item.get("description") or item.get("summary") or "").strip(),
-                }
-                for index, item in enumerate(raw, 1)
-                if isinstance(item, dict) and (item.get("name") or item.get("title") or item.get("description") or item.get("summary"))
-            ]
+            inquiries: list[dict[str, Any]] = []
+            for index, item in enumerate(raw, 1):
+                if not isinstance(item, dict):
+                    continue
+                question = str(item.get("question") or item.get("prompt") or "").strip()
+                if not question:
+                    continue
+                options = LocalLiteratureAssistant._coerce_inquiry_options(item.get("options"))
+                inquiries.append({
+                    "id": str(item.get("id") or item.get("inquiry_id") or f"inquiry_{index}").strip(),
+                    "kind": str(item.get("kind") or ("selection" if options else "clarification")).strip(),
+                    "question": question,
+                    "reason": str(item.get("reason") or "").strip(),
+                    "applies_to": [
+                        str(value).strip()
+                        for value in (item.get("applies_to") if isinstance(item.get("applies_to"), list) else [])
+                        if str(value).strip()
+                    ],
+                    "blocking": bool(item.get("blocking", True)),
+                    "options": options,
+                    "expected_schema": item.get("expected_schema") if isinstance(item.get("expected_schema"), dict) else {},
+                    "default_policy": str(item.get("default_policy") or "ask").strip(),
+                })
+            return inquiries[:12]
         text = str(raw or "").strip()
         if not text or text.upper() == "NOT_FOUND":
             return []
@@ -656,16 +758,23 @@ class LocalLiteratureAssistant:
             except json.JSONDecodeError:
                 data = None
             if isinstance(data, list):
-                return LocalLiteratureAssistant._coerce_simulation_targets(data, model_description=model_description)
-        if "MULTIPLE_MODELS" not in text.upper():
+                return LocalLiteratureAssistant._coerce_inquiries(data)
+        return []
+
+    @staticmethod
+    def _coerce_inquiry_options(raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
             return []
-        lines = [
-            line.strip(" -0123456789.)\t")
-            for line in text.splitlines()
-            if line.strip(" -0123456789.)\t")
-        ]
-        targets = [
-            {"name": f"Target {index}", "description": line}
-            for index, line in enumerate(lines, 1)
-        ]
-        return targets[:8]
+        options: list[dict[str, Any]] = []
+        for index, item in enumerate(raw, 1):
+            if isinstance(item, dict):
+                label = str(item.get("label") or item.get("name") or item.get("title") or f"Option {index}").strip()
+                description = str(item.get("description") or item.get("summary") or "").strip()
+                value = item.get("value", item)
+            else:
+                label = str(item or "").strip()
+                description = ""
+                value = item
+            if label or description:
+                options.append({"label": label or f"Option {index}", "description": description, "value": value})
+        return options[:20]

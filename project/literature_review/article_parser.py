@@ -66,12 +66,14 @@ class ArticleParser:
         async def _search_all_backends():
             combined: list[object] = []
             rate_limited_backends: list[str] = []
+            unavailable_backends: list[str] = []
             attempted_backends: list[str] = []
             for backend in [self.primary_backend, *self.fallback_backends]:
                 backend_name = getattr(backend, "name", backend.__class__.__name__)
                 attempted_backends.append(backend_name)
-                results = await backend.search(
-                    keywords,
+                results = await self._search_backend(
+                    backend,
+                    keywords=keywords,
                     max_results=5,
                     year_min=year_min,
                     year_max=year_max,
@@ -79,6 +81,8 @@ class ArticleParser:
                 )
                 if getattr(backend, "_last_rate_limited", False):
                     rate_limited_backends.append(backend_name)
+                if getattr(backend, "_last_temporarily_unavailable", False):
+                    unavailable_backends.append(backend_name)
                 if results:
                     log.info(
                         "Article lookup received %d result(s) via %s for query %r",
@@ -87,10 +91,13 @@ class ArticleParser:
                         topic_hint,
                     )
                     combined.extend(results)
+            blocked_backends = set(rate_limited_backends) | set(unavailable_backends)
             self.last_search_diagnostics = {
                 "attempted_backends": attempted_backends,
                 "rate_limited_backends": rate_limited_backends,
+                "unavailable_backends": unavailable_backends,
                 "all_rate_limited": bool(attempted_backends) and len(rate_limited_backends) == len(attempted_backends),
+                "all_temporarily_blocked": bool(attempted_backends) and len(blocked_backends) == len(attempted_backends),
             }
             return combined
 
@@ -109,6 +116,30 @@ class ArticleParser:
             reverse=True,
         )
         return raw_to_paper(ranked[0], in_scope=True, reason="")
+
+    @staticmethod
+    async def _search_backend(
+        backend: SearchBackend,
+        *,
+        keywords: list[str],
+        max_results: int,
+        year_min: Optional[int],
+        year_max: Optional[int],
+        authors: object,
+    ) -> list[object]:
+        kwargs = {
+            "max_results": max_results,
+            "year_min": year_min,
+            "year_max": year_max,
+            "authors": authors,
+        }
+        try:
+            return await backend.search(keywords, **kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument 'authors'" not in str(exc):
+                raise
+            kwargs.pop("authors")
+            return await backend.search(keywords, **kwargs)
 
     @staticmethod
     def _match_score(result: object, lookup_spec: dict[str, object]) -> tuple[int, int, int, int, int, int]:
@@ -319,7 +350,7 @@ class ArticleParser:
     @staticmethod
     def _fetch_html_text(url: str) -> str:
         req = urllib.request.Request(url, headers={"User-Agent": "ResearchPlatform/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with urllib.request.urlopen(req, timeout=150) as response:
             raw = response.read()
         html = raw.decode("utf-8", errors="ignore")
         soup = BeautifulSoup(html, "html.parser")

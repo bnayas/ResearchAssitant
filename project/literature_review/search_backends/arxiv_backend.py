@@ -23,7 +23,7 @@ from .base import RawPaper, SearchBackend
 
 log = logging.getLogger(__name__)
 
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 
 # XML namespace map for Atom feed
 NS = {
@@ -35,7 +35,9 @@ NS = {
 class ArXivBackend(SearchBackend):
     name = "arxiv"
     _cooldown_until: float = 0.0
+    _temporary_unavailable_until: float = 0.0
     _last_skip_log_at: float = 0.0
+    _last_unavailable_skip_log_at: float = 0.0
     _next_request_at: float = 0.0
     _schedule_lock = threading.Lock()
 
@@ -45,6 +47,7 @@ class ArXivBackend(SearchBackend):
         """
         self.sort_by = sort_by
         self._last_rate_limited = False
+        self._last_temporarily_unavailable = False
         self._min_interval_seconds = 3.1
 
     async def search(
@@ -57,9 +60,14 @@ class ArXivBackend(SearchBackend):
         authors: Optional[list[str]] = None,
     ) -> list[RawPaper]:
         self._last_rate_limited = False
+        self._last_temporarily_unavailable = False
         if self._in_cooldown():
             self._last_rate_limited = True
             self._log_cooldown_skip()
+            return []
+        if self._in_temporary_unavailable_cooldown():
+            self._last_temporarily_unavailable = True
+            self._log_temporary_unavailable_skip()
             return []
         # Try strict AND query first, fall back to OR if it returns nothing
         for query in [
@@ -77,6 +85,9 @@ class ArXivBackend(SearchBackend):
     async def _fetch_with_retry(self, query: str, max_results: int) -> str:
         """Fetch ArXiv query string; stop quickly on 429 and enter cooldown."""
         params = {"search_query": query, "max_results": max_results, "sortBy": self.sort_by}
+        message = f"ArXiv query: {query} | max_results={max_results} | sortBy={self.sort_by}"
+        print(message, flush=True)
+        log.warning(message)
 
         # --- try aiohttp with 2 retries ---
         try:
@@ -86,8 +97,8 @@ class ArXivBackend(SearchBackend):
                     await self._respect_pacing()
                     log.info("ArXiv request URL: %s, params: %s", ARXIV_API, params)
                     async with aiohttp.ClientSession(
-                        timeout=aiohttp.ClientTimeout(total=25),
-                        headers={"User-Agent": "ResearchAssistant/1.0 (mailto:admin@example.com)"}
+                        timeout=aiohttp.ClientTimeout(total=50),
+                        headers={"User-Agent": f"ResearchAssistant/1.1 (mailto:bot-{id(self)}@example.com)"}
                     ) as session:
                         async with session.get(ARXIV_API, params=params, allow_redirects=True) as resp:
                             if resp.status == 429:
@@ -98,6 +109,10 @@ class ArXivBackend(SearchBackend):
                                 log.warning("ArXiv HTTP %d error: %s", resp.status, text)
                                 resp.raise_for_status()
                             return await resp.text()
+                except asyncio.TimeoutError as exc:
+                    log.warning("ArXiv aiohttp request timed out: %r", exc, exc_info=True)
+                    self._mark_temporarily_unavailable()
+                    return ""
                 except Exception as exc:
                     log.warning("ArXiv aiohttp attempt %d failed: %r", attempt + 1, exc, exc_info=True)
                     if attempt < 1:
@@ -110,11 +125,11 @@ class ArXivBackend(SearchBackend):
         url = ARXIV_API + "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "ResearchAssistant/1.0 (mailto:admin@example.com)"}
+            headers={"User-Agent": f"ResearchAssistant/1.1 (mailto:bot-{id(self)}@example.com)"}
         )
         try:
             await self._respect_pacing()
-            with urllib.request.urlopen(req, timeout=25) as r:
+            with urllib.request.urlopen(req, timeout=50) as r:
                 return r.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             if getattr(exc, "code", None) == 429:
@@ -235,9 +250,23 @@ class ArXivBackend(SearchBackend):
         cls._cooldown_until = max(cls._cooldown_until, until)
         log.warning("ArXiv rate-limited; entering cooldown for %ds", int(max(cls._cooldown_until - time.time(), 0)))
 
+    def _mark_temporarily_unavailable(self, wait_seconds: int = 60) -> None:
+        self._last_temporarily_unavailable = True
+        cls = type(self)
+        until = time.time() + max(wait_seconds, 120)
+        cls._temporary_unavailable_until = max(cls._temporary_unavailable_until, until)
+        log.warning(
+            "ArXiv temporarily unavailable; entering short cooldown for %ds",
+            int(max(cls._temporary_unavailable_until - time.time(), 0)),
+        )
+
     @classmethod
     def _in_cooldown(cls) -> bool:
         return time.time() < cls._cooldown_until
+
+    @classmethod
+    def _in_temporary_unavailable_cooldown(cls) -> bool:
+        return time.time() < cls._temporary_unavailable_until
 
     @classmethod
     def _log_cooldown_skip(cls) -> None:
@@ -247,6 +276,15 @@ class ArXivBackend(SearchBackend):
         cls._last_skip_log_at = now
         remaining = int(max(cls._cooldown_until - now, 0))
         log.warning("ArXiv cooldown active; skipping request for %ds", remaining)
+
+    @classmethod
+    def _log_temporary_unavailable_skip(cls) -> None:
+        now = time.time()
+        if now - cls._last_unavailable_skip_log_at < 5:
+            return
+        cls._last_unavailable_skip_log_at = now
+        remaining = int(max(cls._temporary_unavailable_until - now, 0))
+        log.warning("ArXiv temporary-unavailable cooldown active; skipping request for %ds", remaining)
 
     @staticmethod
     def _parse_retry_after(value: Optional[str]) -> Optional[int]:

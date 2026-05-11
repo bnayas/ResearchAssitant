@@ -221,6 +221,12 @@ class TestParseJson:
         # Should either parse it or extract inner JSON
         assert result is not None
 
+    def test_repairs_invalid_latex_backslash_escapes(self):
+        raw = '{"spec_complete": false, "questions": [{"text": "Use \\gamma and \\nu?", "topic": "variable_range"}]}'
+        result = _parse_json(raw)
+        assert result["spec_complete"] is False
+        assert result["questions"][0]["text"] == "Use \\gamma and \\nu?"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _validate_questions

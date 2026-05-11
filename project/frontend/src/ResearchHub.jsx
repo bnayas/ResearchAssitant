@@ -26,6 +26,22 @@ const ASSISTANT_ROSTER = [
   { label: "Writer", color: "var(--accent-pink)" },
 ];
 
+function TabPanel({ active, children }) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+        display: active ? "flex" : "none",
+        flexDirection: "column",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function ResearchHub() {
   const [activeTab, setActiveTab]     = useState("directives");
   const [backendOk, setBackendOk]     = useState(null); // null|true|false
@@ -195,37 +211,41 @@ export default function ResearchHub() {
 
       {/* ── Panel content ── */}
       <main style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {activeTab === "directives" && (
+        <TabPanel active={activeTab === "directives"}>
           <DirectivesPanel
             onArtifact={handleArtifact}
             professorName={deskSettings.professorName}
             onFocusChange={handleFocusChange}
+            isActive={activeTab === "directives"}
             incomingContext={deskContext}
             onClearIncomingContext={() => setDeskContext("")}
           />
-        )}
-        {activeTab === "literature" && (
+        </TabPanel>
+        <TabPanel active={activeTab === "literature"}>
           <LitReviewPanel
             onArtifact={handleArtifact}
             onFocusChange={handleFocusChange}
+            isActive={activeTab === "literature"}
             onAttachToDesk={handleAttachToDesk}
           />
-        )}
-        {activeTab === "simulation" && (
+        </TabPanel>
+        <TabPanel active={activeTab === "simulation"}>
           <SimPanel
             onArtifact={handleArtifact}
             onFocusChange={handleFocusChange}
+            isActive={activeTab === "simulation"}
           />
-        )}
-        {activeTab === "writer" && (
+        </TabPanel>
+        <TabPanel active={activeTab === "writer"}>
           <WriterPanel
             litArtifact={artifacts.literature}
             simArtifact={artifacts.simulation}
             onArtifact={handleArtifact}
             onFocusChange={handleFocusChange}
+            isActive={activeTab === "writer"}
           />
-        )}
-        {activeTab === "review" && (
+        </TabPanel>
+        <TabPanel active={activeTab === "review"}>
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
             <div style={{ textAlign: "center" }}>
               <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, color: "var(--text-primary)", fontStyle: "italic", marginBottom: 8 }}>
@@ -240,7 +260,7 @@ export default function ResearchHub() {
               </div>
             </div>
           </div>
-        )}
+        </TabPanel>
       </main>
     </div>
   );

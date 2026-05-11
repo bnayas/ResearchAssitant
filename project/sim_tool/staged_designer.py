@@ -254,8 +254,14 @@ class StagedSpecGenerator:
                 f"{len(result.errors)} error(s)"
             )
             spec = self._phase5_repair(spec, result, skeleton, sid)
+            spec = _apply_deterministic_repairs(
+                spec, self._validator.validate(spec), sid
+            )
 
         result = self._validator.validate(spec)
+        if not result.passed:
+            spec = _apply_deterministic_repairs(spec, result, sid)
+            result = self._validator.validate(spec)
         if not result.passed:
             raise ValueError(
                 f"[{sid}] Staged generation failed after {max_repair_attempts} repairs.\n"
@@ -722,7 +728,6 @@ class StagedSpecGenerator:
             result = self._backend.complete(
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2048,
                 temperature=0.0,
             )
             log.debug(f"[{label}] Response: {len(result)} chars")
@@ -730,6 +735,59 @@ class StagedSpecGenerator:
         except Exception as exc:
             log.error(f"[{label}] LLM call failed: {exc}")
             raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Deterministic repair helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _apply_deterministic_repairs(spec: SimulationSpec, validation, sid: str) -> SimulationSpec:
+    """Fix validation-contract failures that do not need another LLM call."""
+    changed: list[str] = []
+    errors_by_field: dict[str, set[str]] = {}
+    for error in validation.errors:
+        field = error.field.split("[")[0].split(".")[0]
+        errors_by_field.setdefault(field, set()).add(error.code)
+
+    if "missing_return" in errors_by_field.get("progress_code", set()):
+        spec.progress_code = _fallback_progress_code(spec)
+        changed.append("progress_code")
+
+    if "missing_return" in errors_by_field.get("precompute_code", set()):
+        spec.precompute_code = "return {}"
+        changed.append("precompute_code")
+
+    if "missing_return" in errors_by_field.get("initial_state_code", set()):
+        spec.initial_state_code = "return SimState()"
+        changed.append("initial_state_code")
+
+    if "missing_return" in errors_by_field.get("step_code", set()):
+        spec.step_code = "return state"
+        changed.append("step_code")
+
+    if changed:
+        log.info(
+            f"[{sid}] Applied deterministic staged repairs: {', '.join(changed)}"
+        )
+    return spec
+
+
+def _fallback_progress_code(spec: SimulationSpec) -> str:
+    """Return a generic progress body that is valid for any generated SimState."""
+    field_names = [
+        name
+        for name, *_ in spec.state_fields
+        if name not in {"history"} and name.isidentifier()
+    ][:4]
+    return (
+        "parts = [f\"step={state.step}\", f\"sim_time={state.sim_time:.4g}\"]\n"
+        f"for name in {tuple(field_names)!r}:\n"
+        "    value = getattr(state, name, None)\n"
+        "    if isinstance(value, (list, tuple)) and len(value) > 6:\n"
+        "        value = f\"len={len(value)}\"\n"
+        "    parts.append(f\"{name}={value}\")\n"
+        "return \", \".join(parts[:4])"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -770,25 +828,23 @@ def _clean_function_body(raw: str) -> str:
     or add trailing prose.  This strips all of that and ensures uniform
     4-space indentation.
     """
-    text = raw.strip()
+    text = raw.strip("\r\n")
     # Strip markdown fences
-    if text.startswith("```python"):
-        text = text[9:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
+    lines = text.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    text = "\n".join(lines).strip("\r\n")
 
     # If the LLM included the def line, strip it and dedent
     lines = text.splitlines()
     if lines and lines[0].strip().startswith("def "):
         lines = lines[1:]  # drop the def line
         text = "\n".join(lines)
-        text = textwrap.dedent(text)
 
     # Re-indent uniformly to 4 spaces
-    dedented = textwrap.dedent(text)
+    dedented = textwrap.dedent(text).strip()
     body = textwrap.indent(dedented, "    ")
 
     return body if body.strip() else "    pass"

@@ -558,6 +558,24 @@ class SimulationDesignerService:
 
     def _compose_description(self, task: TaskEnvelope, sources: list[ArtifactRef]) -> str:
         parts = [task.instructions.strip()]
+        resolved_inquiries = task.metadata.get("resolved_inquiries")
+        if isinstance(resolved_inquiries, list) and resolved_inquiries:
+            inquiry_lines = []
+            for index, item in enumerate(resolved_inquiries, 1):
+                if not isinstance(item, dict):
+                    continue
+                question = str(item.get("question") or item.get("id") or f"Inquiry {index}").strip()
+                selected = item.get("selected_options") if isinstance(item.get("selected_options"), list) else []
+                if selected:
+                    selected_labels = ", ".join(
+                        str(option.get("label") or option.get("name") or option)
+                        for option in selected
+                    )
+                    inquiry_lines.append(f"{index}. {question}: {selected_labels}")
+                else:
+                    inquiry_lines.append(f"{index}. {question}: {json.dumps(item.get('answer') or {})}")
+            if inquiry_lines:
+                parts.append("Resolved PI inquiries:\n" + "\n".join(inquiry_lines))
         selected_targets = task.metadata.get("selected_simulation_targets")
         if isinstance(selected_targets, list) and selected_targets:
             target_lines = []
@@ -732,7 +750,6 @@ class JournalReviewerService:
             system="You are a rigorous journal reviewer. Return plain text only.",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=2000,
         )
         return MediatedResponse(status="completed", session_id=session_id, payload={"review_text": review_text})
 

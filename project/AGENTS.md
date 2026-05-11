@@ -34,6 +34,78 @@ Director (orchestrator)
 
 ---
 
+## Tool-First Architecture (New)
+
+The platform now includes a modular, tool-first agent layer in
+`research_platform/agents/` with an LLM-planned orchestrator in
+`research_platform/orchestrator.py`.  This system runs alongside the
+existing agents — both are fully functional.
+
+```
+Orchestrator (LLM-planned, tool-driven)
+│
+├── LiteratureAgent   (6 tools)  agents/literature/
+│   ├── prepare_article_lookup   — extract search constraints from directive
+│   ├── find_primary_article     — search arXiv + Semantic Scholar
+│   ├── build_article_brief      — extract model, params, procedure
+│   ├── review_related_literature— multi-round search + synthesis
+│   ├── answer_from_article      — QA from article text
+│   └── answer_from_review       — QA from review synthesis
+│
+├── CodingAgent       (6 tools)  agents/coding/
+│   ├── plan_simulation_functions— LLM function planning from goal
+│   ├── generate_function        — single function gen + recursive sub-functions + cache
+│   ├── design_simulation_spec   — direct SimulationDesigner + auto-clarification
+│   ├── run_sample               — sample run for validation
+│   ├── analyze_results          — analyst LLM verdict + patch proposals
+│   └── run_full_sweep           — full parameter sweep
+│
+├── WriterAgent       (3 tools)  agents/writer/
+│   ├── plan_review_structure    — LLM section planning
+│   ├── draft_section            — single section drafting
+│   └── assemble_review          — section assembly
+│
+├── MathAgent         (5 tools)  agents/math/
+│   ├── evaluate_expression      — safe math eval
+│   ├── solve_equation           — scipy root_scalar
+│   ├── solve_ode                — scipy solve_ivp
+│   ├── verify_numeric_claim     — expression vs claimed value
+│   └── verify_statistical_claim — recompute stat tests
+│
+└── RuntimeAgent      (2 tools)  agents/runtime/
+    ├── materialize_runtime      — generate script + notebook
+    └── execute_run              — run with diagnostics
+```
+
+### How it works
+
+1. **Tool Discovery** — Orchestrator collects `ToolDescriptor`s from all
+   registered `BaseAgent` instances via `agent.tools()`.
+2. **LLM Planning** — Sends directive + full tool catalog (JSON) to LLM,
+   receives ordered `PlanStep` list.  Falls back to phase-based default plan.
+3. **Requirement Validation** — Each `ToolRequirement` is validated
+   deterministically before dispatch (type checks + custom validators).
+4. **Artifact Wiring** — Steps declare `artifact_inputs` mapping param names
+   to artifact kinds produced by earlier steps.
+5. **Dispatch** — `agent.invoke(tool_name, ToolContext)` returns `ToolResult`.
+6. **needs_input Handling** — Clarifications route to PI or delegate to
+   math agent based on `capability_hint`.
+
+### Key types (`agents/base.py`)
+
+| Type | Role |
+|------|------|
+| `BaseAgent` | Abstract base — `agent_id()`, `tools()`, `invoke()` |
+| `ToolDescriptor` | Self-describing capability (JSON-serialisable) |
+| `ToolRequirement` | Typed input with LLM description + deterministic validator |
+| `ToolContext` | Generic input envelope for tool invocation |
+| `ToolResult` | Generic output — `status`, `artifacts`, `message`, `request` |
+
+### Testing
+
+143 tests covering foundation types, per-agent validation, orchestrator
+planning/execution, integration wiring, and Phase 4 internal refactors.
+
 ## sim_tool agents
 
 ### SymbolicAgent

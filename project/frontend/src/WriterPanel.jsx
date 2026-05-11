@@ -57,7 +57,7 @@ function SectionTab({ sections, activeId, onSelect }) {
   );
 }
 
-export default function WriterPanel({ litArtifact, simArtifact, onArtifact, onFocusChange }) {
+export default function WriterPanel({ litArtifact, simArtifact, onArtifact, onFocusChange, isActive = true }) {
   const [description, setDescription] = useState(DEFAULT_DESC);
   const [venue, setVenue]     = useState("Research note");
   const [artCtx, setArtCtx]   = useState("");
@@ -82,8 +82,9 @@ export default function WriterPanel({ litArtifact, simArtifact, onArtifact, onFo
   }, [chunks]);
 
   useEffect(() => {
+    if (!isActive) return;
     onFocusChange?.(buildFocusLabel(description, venue));
-  }, [description, venue, onFocusChange]);
+  }, [description, venue, onFocusChange, isActive]);
 
   // Pre-fill artifact context from upstream panels
   useEffect(() => {

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import inspect
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -139,51 +140,94 @@ class MediatorWorkflowRunner:
             raise
 
     def _phase_find_article(self) -> ArtifactRef:
-        task = self._task(
-            AssistantId.LITERATURE_REVIEWER.value,
-            task_id=f"{self.directive.directive_id}-article-lookup",
-            subject="Prepare and run article lookup",
-            instructions=self.directive.instruction,
-            metadata={"topic_hint": self.directive.topic_hint},
-        )
-        spec_response = self.literature_agent.prepare_article_lookup_spec(task)
-        spec_response = self._resolve_response(
-            service_id=AssistantId.LITERATURE_REVIEWER.value,
-            response=spec_response,
-            resume_fn=self.literature_agent.resume_literature_task,
-        )
-        lookup_spec = dict(spec_response.payload or {})
-        lookup_task = self._task(
-            AssistantId.LITERATURE_REVIEWER.value,
-            task_id=f"{self.directive.directive_id}-find-article",
-            subject="Find primary article",
-            instructions=self.directive.instruction,
-            metadata={
-                "topic_hint": self.directive.topic_hint,
-                "article_lookup_spec": lookup_spec,
-                "article_lookup_query": lookup_spec.get("query_string", ""),
-            },
-        )
-        article_response = self._resolve_response(
-            service_id=AssistantId.LITERATURE_REVIEWER.value,
-            response=self.literature_agent.find_primary_article(lookup_task),
-            resume_fn=self.literature_agent.resume_literature_task,
-        )
-        article = self._artifact(article_response.payload["artifact_id"])
-        authors = ", ".join(article.metadata.get("authors") or [])
-        year = article.metadata.get("year") or "?"
-        self._send_message(
-            assistant=AssistantId.LITERATURE_REVIEWER.value,
-            subject="Found article — ready to proceed",
-            body=(
-                f"I found the target article:\n\n"
-                f"\"{article.metadata.get('title', article.title)}\"\n"
-                f"{authors} ({year})\n\n"
-                f"Query:\n{lookup_spec.get('query_string', '')}"
-            ),
-            attachments=[article.as_attachment(name="article_match.json")],
-        )
-        return article
+        import uuid
+        instructions = self.directive.instruction
+        while True:
+            task = self._task(
+                AssistantId.LITERATURE_REVIEWER.value,
+                task_id=f"{self.directive.directive_id}-article-lookup",
+                subject="Prepare and run article lookup",
+                instructions=instructions,
+                metadata={"topic_hint": self.directive.topic_hint},
+            )
+            spec_response = self.literature_agent.prepare_article_lookup_spec(task)
+            spec_response = self._resolve_response(
+                service_id=AssistantId.LITERATURE_REVIEWER.value,
+                response=spec_response,
+                resume_fn=self.literature_agent.resume_literature_task,
+            )
+            lookup_spec = dict(spec_response.payload or {})
+            lookup_task = self._task(
+                AssistantId.LITERATURE_REVIEWER.value,
+                task_id=f"{self.directive.directive_id}-find-article",
+                subject="Find primary article",
+                instructions=instructions,
+                metadata={
+                    "topic_hint": self.directive.topic_hint,
+                    "article_lookup_spec": lookup_spec,
+                    "article_lookup_query": lookup_spec.get("query_string", ""),
+                },
+            )
+            article_response = self._resolve_response(
+                service_id=AssistantId.LITERATURE_REVIEWER.value,
+                response=self.literature_agent.find_primary_article(lookup_task),
+                resume_fn=self.literature_agent.resume_literature_task,
+            )
+            article = self._artifact(article_response.payload["artifact_id"])
+            authors = ", ".join(article.metadata.get("authors") or [])
+            year = article.metadata.get("year") or "?"
+            self._send_message(
+                assistant=AssistantId.LITERATURE_REVIEWER.value,
+                subject="Found article — ready to proceed",
+                body=(
+                    f"I found the target article:\n\n"
+                    f"\"{article.metadata.get('title', article.title)}\"\n"
+                    f"{authors} ({year})\n\n"
+                    f"Query:\n{lookup_spec.get('query_string', '')}"
+                ),
+                attachments=[article.as_attachment(name="article_match.json")],
+            )
+
+            if not self._should_confirm_primary_article():
+                return article
+
+            request = OrchestrationRequestEnvelope.new(
+                resume_token=f"{self.directive.directive_id}-article-review-{uuid.uuid4().hex[:8]}",
+                request_kind="review",
+                question="I found the target article. Proceed with parsing, or revise the lookup query?",
+                expected_schema={},
+                capability_hint="user",
+            )
+
+            def _resume_review(session_id: str, payload: dict[str, Any]) -> MediatedResponse:
+                return MediatedResponse(status="completed", session_id=session_id, payload=payload)
+
+            review_response = self._resolve_response(
+                service_id=AssistantId.ORCHESTRATOR.value,
+                response=MediatedResponse(status="needs_request", session_id=request.resume_token, request=request),
+                resume_fn=_resume_review,
+            )
+
+            payload = review_response.payload if isinstance(review_response.payload, dict) else {}
+            action = payload.get("action", "continue")
+            feedback = payload.get("feedback", "")
+
+            if action == "continue":
+                return article
+            else:
+                instructions += f"\n\n[PI Feedback on previous article lookup:\n{feedback}]"
+
+    def _should_confirm_primary_article(self) -> bool:
+        """Return whether article lookup should block for PI confirmation."""
+        direct = getattr(self.directive, "confirm_primary_article", None)
+        if direct is not None:
+            return bool(direct)
+        metadata = getattr(self.directive, "metadata", {}) or {}
+        if isinstance(metadata, dict):
+            for key in ("confirm_primary_article", "confirm_article", "review_primary_article"):
+                if key in metadata:
+                    return bool(metadata[key])
+        return False
 
     def _phase_parse_article(self, article: ArtifactRef) -> ArtifactRef:
         task = self._task(
@@ -215,9 +259,66 @@ class MediatorWorkflowRunner:
             instructions=self.directive.instruction,
             metadata={"topic_hint": self.directive.topic_hint},
         )
+        def _on_literature_event(event: Any) -> None:
+            payload = dict(getattr(event, "payload", {}) or {})
+            event_type = str(getattr(event, "event_type", ""))
+            if event_type == "title_found":
+                title = str(payload.get("title") or "Accepted paper")
+                year = payload.get("year") or "?"
+                source = payload.get("source") or "unknown"
+                authors = ", ".join(str(author) for author in (payload.get("authors") or [])[:4])
+                url = str(payload.get("url") or "")
+                body = f"{title} ({year})\nSource: {source}"
+                if authors:
+                    body += f"\nAuthors: {authors}"
+                if url:
+                    body += f"\nURL: {url}"
+                self._send_message(
+                    assistant=AssistantId.LITERATURE_REVIEWER.value,
+                    subject=f"Accepted related paper — {title[:80]}",
+                    body=body,
+                )
+            elif event_type == "search_round_start":
+                self._send_message(
+                    assistant=AssistantId.LITERATURE_REVIEWER.value,
+                    subject=f"Literature search round {payload.get('round', '?')} started",
+                    body=(
+                        f"Keywords: {payload.get('keywords')}\n"
+                        f"Authors: {payload.get('authors') or []}\n"
+                        f"Year range: {payload.get('year_min')}–{payload.get('year_max')}\n"
+                        f"Relaxed: {bool(payload.get('relaxed'))}"
+                    ),
+                )
+            elif event_type == "round_summary":
+                self._send_message(
+                    assistant=AssistantId.LITERATURE_REVIEWER.value,
+                    subject=f"Literature search round {payload.get('round', '?')} summary",
+                    body=(
+                        f"Raw candidates: {payload.get('raw', 0)}\n"
+                        f"Validated: {payload.get('validated', 0)}\n"
+                        f"Skipped by prefilter: {payload.get('skipped_prefilter', 0)}\n"
+                        f"Accepted in scope: {payload.get('in_scope', 0)}\n"
+                        f"Sources: {payload.get('sources') or []}"
+                    ),
+                )
+            elif event_type == "keyword_refined":
+                self._send_message(
+                    assistant=AssistantId.LITERATURE_REVIEWER.value,
+                    subject=f"Literature keywords refined for round {payload.get('round', '?')}",
+                    body=f"Next keyword sets: {payload.get('keywords')}",
+                )
+
+        review_fn = self.literature_agent.review_related_literature
+        review_kwargs: dict[str, Any] = {}
+        signature = inspect.signature(review_fn)
+        if "stream_callback" in signature.parameters or any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in signature.parameters.values()
+        ):
+            review_kwargs["stream_callback"] = _on_literature_event
         response = self._resolve_response(
             service_id=AssistantId.LITERATURE_REVIEWER.value,
-            response=self.literature_agent.review_related_literature(task, article, brief),
+            response=review_fn(task, article, brief, **review_kwargs),
             resume_fn=self.literature_agent.resume_literature_task,
         )
         review = self._artifact(response.payload["artifact_id"])
@@ -236,10 +337,10 @@ class MediatorWorkflowRunner:
         brief: ArtifactRef,
         literature: ArtifactRef,
     ) -> list[ArtifactRef]:
-        selected_targets = self._resolve_simulation_target_scope(brief)
         metadata: dict[str, Any] = {"sample_steps": 200}
-        if selected_targets:
-            metadata["selected_simulation_targets"] = selected_targets
+        resolved_inquiries = self._resolve_phase_inquiries(brief, phase="simulation")
+        if resolved_inquiries:
+            metadata["resolved_inquiries"] = resolved_inquiries
         task = self._task(
             AssistantId.CODING_AGENT.value,
             task_id=f"{self.directive.directive_id}-simulation",
@@ -264,44 +365,62 @@ class MediatorWorkflowRunner:
         )
         return artifacts
 
-    def _resolve_simulation_target_scope(self, brief: ArtifactRef) -> list[dict[str, Any]]:
-        targets = self._simulation_targets_from_brief(brief)
-        if len(targets) <= 1:
-            return targets
+    def _resolve_phase_inquiries(self, brief: ArtifactRef, *, phase: str) -> list[dict[str, Any]]:
+        resolved: list[dict[str, Any]] = []
+        for inquiry in self._inquiries_from_brief(brief, phase=phase):
+            if not inquiry.get("blocking", True):
+                continue
+            resolved.append(self._resolve_inquiry(inquiry))
+        return resolved
 
-        session_id = f"{self.directive.directive_id}-simulation-scope"
+    def _resolve_inquiry(self, inquiry: dict[str, Any]) -> dict[str, Any]:
+        inquiry_id = str(inquiry.get("id") or "inquiry").strip() or "inquiry"
+        session_id = f"{self.directive.directive_id}-inquiry-{inquiry_id}"
+        options = list(inquiry.get("options") or [])
         options_text = "\n".join(
-            f"{index}. {target.get('name') or 'Simulation target'}"
-            + (f" — {target.get('description')}" if target.get("description") else "")
-            for index, target in enumerate(targets, 1)
+            f"{index}. {option.get('label') or option.get('name') or 'Option'}"
+            + (f" — {option.get('description')}" if option.get("description") else "")
+            for index, option in enumerate(options, 1)
         )
+        prompt = str(inquiry.get("question") or "").strip()
+        if options_text:
+            prompt = f"{prompt}\n\n{options_text}\n\nAnswer with option numbers, names, or 'all'."
         request = OrchestrationRequestEnvelope.new(
             resume_token=session_id,
-            request_kind="selection",
-            question=(
-                "The article brief contains multiple simulation targets.\n\n"
-                f"{options_text}\n\n"
-                "Which target(s) should be simulated? You can answer with option numbers, names, or 'all'."
+            request_kind="inquiry",
+            question=prompt,
+            expected_schema=inquiry.get("expected_schema") or (
+                {"answers": {"selection": "string"}} if options else {"answers": {"answer": "string"}}
             ),
-            expected_schema={"answers": {"selection": "string"}},
             capability_hint="user",
-            metadata={"options": targets, "default_policy": "all"},
+            metadata={"inquiry": inquiry, "options": options},
         )
 
-        def _resume_selection(_session_id: str, payload: dict[str, Any]) -> MediatedResponse:
+        def _resume_inquiry(_session_id: str, payload: dict[str, Any]) -> MediatedResponse:
             return MediatedResponse(
                 status="completed",
                 session_id=session_id,
-                payload={"selected_targets": self._select_targets(targets, payload)},
+                payload={
+                    "inquiry_id": inquiry_id,
+                    "answer": payload,
+                    "selected_options": self._select_options(options, payload) if options else [],
+                },
             )
 
         resolved = self._resolve_response(
             service_id=AssistantId.ORCHESTRATOR.value,
             response=MediatedResponse(status="needs_request", session_id=session_id, request=request),
-            resume_fn=_resume_selection,
+            resume_fn=_resume_inquiry,
         )
-        selected = resolved.payload.get("selected_targets") if isinstance(resolved.payload, dict) else None
-        return list(selected or targets)
+        payload = resolved.payload if isinstance(resolved.payload, dict) else {}
+        return {
+            "id": inquiry_id,
+            "kind": inquiry.get("kind") or "inquiry",
+            "question": inquiry.get("question") or "",
+            "answer": payload.get("answer") or {},
+            "selected_options": payload.get("selected_options") or [],
+            "inquiry": inquiry,
+        }
 
     def _phase_write(self, sources: list[ArtifactRef]) -> ArtifactRef:
         task = self._task(
@@ -445,12 +564,15 @@ class MediatorWorkflowRunner:
             return normalized
         if "answers" in payload:
             return {"kind": "clarification_answers", "answers": dict(payload.get("answers") or {})}
-        feedback = str(payload.get("feedback") or "")
-        if feedback:
-            return {"kind": "steering_feedback", "feedback": feedback}
+        if "action" in payload or "feedback" in payload:
+            return {
+                "kind": "steering_feedback",
+                "action": payload.get("action", "continue"),
+                "feedback": payload.get("feedback", "")
+            }
         if "clarification" in payload:
             return {"kind": "clarification_answers", "answers": {"clarification": str(payload["clarification"])}}
-        return {"kind": "steering_feedback", "feedback": json.dumps(payload)}
+        return {"kind": "steering_feedback", "feedback": json.dumps(payload), "action": "continue"}
 
     def _request_steering_metadata(
         self,
@@ -461,12 +583,12 @@ class MediatorWorkflowRunner:
     ) -> dict[str, Any]:
         title = {
             "clarification": "Answer agent clarification",
-            "selection": "Choose simulation scope",
+            "inquiry": "Resolve agent inquiry",
         }.get(request.request_kind, "Respond to agent request")
         return {
             "checkpoint_id": request.request_id,
             "state": "awaiting_pi",
-            "kind": "agent_request",
+            "kind": "agent_request" if request.request_kind in ("inquiry", "clarification") else "checkpoint",
             "assistant": service_id,
             "session_id": session_id,
             "request_id": request.request_id,
@@ -478,27 +600,50 @@ class MediatorWorkflowRunner:
         }
 
     @staticmethod
-    def _simulation_targets_from_brief(brief: ArtifactRef) -> list[dict[str, Any]]:
-        raw_targets = brief.metadata.get("simulation_targets")
-        if not isinstance(raw_targets, list):
+    def _inquiries_from_brief(brief: ArtifactRef, *, phase: str) -> list[dict[str, Any]]:
+        raw_inquiries = brief.metadata.get("inquiries")
+        if not isinstance(raw_inquiries, list):
             return []
-        targets: list[dict[str, Any]] = []
-        for index, item in enumerate(raw_targets, 1):
-            if isinstance(item, dict):
-                name = str(item.get("name") or item.get("title") or f"Target {index}").strip()
-                description = str(item.get("description") or item.get("summary") or "").strip()
-                metadata = {str(key): value for key, value in item.items() if key not in {"name", "title", "description", "summary"}}
-            else:
-                name = f"Target {index}"
-                description = str(item or "").strip()
-                metadata = {}
-            if not name and not description:
+        inquiries: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_inquiries, 1):
+            if not isinstance(item, dict):
                 continue
-            targets.append({"name": name or f"Target {index}", "description": description, "metadata": metadata})
-        return targets
+            question = str(item.get("question") or item.get("prompt") or "").strip()
+            if not question:
+                continue
+            applies_to = item.get("applies_to")
+            if isinstance(applies_to, list):
+                scopes = {str(value).strip().lower() for value in applies_to if str(value).strip()}
+                if scopes and phase.lower() not in scopes:
+                    continue
+            inquiry = dict(item)
+            inquiry["id"] = str(item.get("id") or item.get("inquiry_id") or f"inquiry_{index}").strip()
+            inquiry["question"] = question
+            inquiry["kind"] = str(item.get("kind") or "inquiry").strip()
+            inquiry["options"] = MediatorWorkflowRunner._normalize_options(item.get("options"))
+            inquiries.append(inquiry)
+        return inquiries
 
     @staticmethod
-    def _select_targets(targets: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _normalize_options(raw_options: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_options, list):
+            return []
+        options: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_options, 1):
+            if isinstance(item, dict):
+                label = str(item.get("label") or item.get("name") or item.get("title") or f"Option {index}").strip()
+                description = str(item.get("description") or item.get("summary") or "").strip()
+                value = item.get("value", item)
+            else:
+                label = str(item or "").strip()
+                description = ""
+                value = item
+            if label or description:
+                options.append({"label": label or f"Option {index}", "description": description, "value": value})
+        return options
+
+    @staticmethod
+    def _select_options(options: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
         answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
         text = " ".join(
             str(value)
@@ -511,18 +656,18 @@ class MediatorWorkflowRunner:
             if str(value or "").strip()
         ).strip()
         if not text or text.lower() in {"all", "both", "everything"}:
-            return targets
+            return options
 
         selected: list[dict[str, Any]] = []
         lowered = text.lower()
-        for index, target in enumerate(targets, 1):
-            name = str(target.get("name") or "").lower()
+        for index, option in enumerate(options, 1):
+            label = str(option.get("label") or "").lower()
             if str(index) in lowered.split() or f"{index}," in lowered or f"{index}." in lowered:
-                selected.append(target)
+                selected.append(option)
                 continue
-            if name and name in lowered:
-                selected.append(target)
-        return selected or targets
+            if label and label in lowered:
+                selected.append(option)
+        return selected or options
 
     def _artifact(self, artifact_id: str) -> ArtifactRef:
         artifact = self.artifact_registry.get(artifact_id)
