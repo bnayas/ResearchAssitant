@@ -31,6 +31,26 @@ class _SemanticHitBackend(SearchBackend):
         ]
 
 
+class _UnavailableBackend(SearchBackend):
+    name = "arxiv"
+
+    def __init__(self):
+        self._last_temporarily_unavailable = True
+
+    async def search(self, keywords, max_results, year_min=None, year_max=None, categories=None):
+        return []
+
+
+class _RateLimitedBackend(SearchBackend):
+    name = "semantic_scholar"
+
+    def __init__(self):
+        self._last_rate_limited = True
+
+    async def search(self, keywords, max_results, year_min=None, year_max=None, categories=None):
+        return []
+
+
 def test_article_parser_falls_back_to_semantic_scholar_when_arxiv_returns_nothing():
     parser = ArticleParser(_EmptyBackend(), fallback_backends=[_SemanticHitBackend()])
 
@@ -40,6 +60,17 @@ def test_article_parser_falls_back_to_semantic_scholar_when_arxiv_returns_nothin
     assert paper.source == "semantic_scholar"
     assert paper.title == "Stochastic Gradient Langevin Dynamics"
     assert paper.doi == "10.0000/example"
+
+
+def test_article_parser_reports_all_temporarily_blocked_backends():
+    parser = ArticleParser(_UnavailableBackend(), fallback_backends=[_RateLimitedBackend()])
+
+    paper = parser.find_article("Danino, Shnerb, neutral dynamics")
+
+    assert paper is None
+    assert parser.last_search_diagnostics["all_temporarily_blocked"] is True
+    assert parser.last_search_diagnostics["unavailable_backends"] == ["arxiv"]
+    assert parser.last_search_diagnostics["rate_limited_backends"] == ["semantic_scholar"]
 
 
 class _MixedBackend(SearchBackend):

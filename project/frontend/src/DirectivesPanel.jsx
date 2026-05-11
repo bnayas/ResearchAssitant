@@ -68,7 +68,7 @@ function AttachmentRow({ attachments }) {
   const [expandedIndex, setExpandedIndex] = useState(null);
 
   if (!attachments || attachments.length === 0) return null;
-  
+
   const expandedAtt = expandedIndex !== null ? attachments[expandedIndex] : null;
   const expandedPayload = expandedAtt ? parseJsonAttachment(expandedAtt) : null;
 
@@ -81,8 +81,8 @@ function AttachmentRow({ attachments }) {
             <span>{att.url ? "🔗" : "📎"}</span>
             <span style={{ color: "var(--text-primary)" }}>{att.name}</span>
             {parseJsonAttachment(att) ? (
-              <button 
-                className="btn" 
+              <button
+                className="btn"
                 onClick={() => setExpandedIndex(expandedIndex === aIdx ? null : aIdx)}
                 style={{ fontSize: 9, padding: "2px 6px", marginLeft: 8 }}
               >
@@ -101,7 +101,7 @@ function AttachmentRow({ attachments }) {
           {expandedPayload.title && <div style={{ fontWeight: "bold", fontSize: 12, marginBottom: 4, color: "var(--text-primary)" }}>{expandedPayload.title}</div>}
           {expandedPayload.authors && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 4 }}>{Array.isArray(expandedPayload.authors) ? expandedPayload.authors.join(", ") : expandedPayload.authors}</div>}
           {expandedPayload.year && <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>Year: {expandedPayload.year}</div>}
-          {expandedPayload.url && <div style={{ fontSize: 10, color: "var(--accent-blue)", marginBottom: 4 }}><a href={expandedPayload.url} target="_blank" rel="noreferrer" style={{color: "inherit", textDecoration: "none"}}>URL: {expandedPayload.url}</a></div>}
+          {expandedPayload.url && <div style={{ fontSize: 10, color: "var(--accent-blue)", marginBottom: 4 }}><a href={expandedPayload.url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>URL: {expandedPayload.url}</a></div>}
           {expandedPayload.abstract && <div style={{ fontSize: 10, marginTop: 8, whiteSpace: "pre-wrap", color: "var(--text-secondary)", lineHeight: 1.6 }}>{expandedPayload.abstract}</div>}
           {!expandedPayload.title && !expandedPayload.abstract && (
             <pre style={{ fontSize: 9, overflowX: "auto", whiteSpace: "pre-wrap", color: "var(--text-secondary)", marginTop: 4 }}>
@@ -184,18 +184,18 @@ function EmailCard({ email }) {
           </div>
         )}
       </div>
-      
+
       <div style={{ padding: "16px" }}>
         <SteeringSummary email={email} />
         <MessageBody text={email.body || ""} defaultExpanded={Boolean(steering)} />
       </div>
-      
+
       <AttachmentRow attachments={email.attachments} />
     </div>
   );
 }
 
-export default function DirectivesPanel({ onArtifact, professorName, onFocusChange, incomingContext, onClearIncomingContext }) {
+export default function DirectivesPanel({ onArtifact, professorName, onFocusChange, incomingContext, onClearIncomingContext, isActive = true }) {
   const [directive, setDirective] = useState({
     instruction: "",
     topicHint: "",
@@ -227,15 +227,16 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
   }, [emails.length]);
 
   useEffect(() => {
+    if (!isActive) return;
     onFocusChange?.(buildFocusLabel(directive.topicHint, directive.instruction));
-  }, [directive.topicHint, directive.instruction, onFocusChange]);
+  }, [directive.topicHint, directive.instruction, onFocusChange, isActive]);
 
   useEffect(() => {
     if (incomingContext) {
       setDirective(p => ({
         ...p,
-        instruction: p.instruction 
-          ? p.instruction + "\n\n" + incomingContext 
+        instruction: p.instruction
+          ? p.instruction + "\n\n" + incomingContext
           : incomingContext
       }));
       onClearIncomingContext?.();
@@ -312,7 +313,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
         provider: directive.llm.provider,
         url: directive.llm.url,
         model: directive.llm.model,
-        timeoutSeconds: 120.0
+        timeoutSeconds: 3000.0
       }
     };
 
@@ -366,6 +367,13 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
     setDirective(prev => ({ ...prev, phases: { ...prev.phases, [key]: !prev.phases[key] } }));
   };
 
+  const setLlmField = (field, value) => {
+    setDirective(prev => ({
+      ...prev,
+      llm: { ...prev.llm, [field]: value },
+    }));
+  };
+
   const handleSteering = async (action) => {
     if (!directiveId || !pendingSteering) return;
     const isAgentRequest = pendingSteering.kind === "agent_request";
@@ -376,7 +384,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
       }
       setSteeringBusy(true);
       setSteeringError(null);
-      
+
       const answerText = Object.entries(steeringAnswers)
         .filter(([k, v]) => v && v.trim())
         .map(([k, v]) => `${k}: ${v}`)
@@ -413,7 +421,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
     }
     setSteeringBusy(true);
     setSteeringError(null);
-    
+
     const isRevise = action === "revise";
     const mockEmail = {
       timestamp: Date.now() / 1000,
@@ -481,7 +489,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
       <div style={{ width: 340, borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", background: "var(--bg-surface)", overflowY: "auto" }}>
         <div style={{ padding: 20 }}>
           <div className="sec-label">Professor Brief</div>
-          
+
           <div style={{ marginBottom: 15 }}>
             <div className="fld-label">Professor</div>
             <div className="card" style={{ padding: "10px 12px", fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.6 }}>
@@ -498,7 +506,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
               className="ta"
               rows={4}
               value={directive.instruction}
-              onChange={e => setDirective({...directive, instruction: e.target.value})}
+              onChange={e => setDirective({ ...directive, instruction: e.target.value })}
               placeholder="Describe the paper, task, or reproduction goal for the assistant team."
             />
           </div>
@@ -508,7 +516,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
             <input
               className="inp"
               value={directive.topicHint}
-              onChange={e => setDirective({...directive, topicHint: e.target.value})}
+              onChange={e => setDirective({ ...directive, topicHint: e.target.value })}
               placeholder="keywords, methods, authors, datasets, phenomena"
             />
           </div>
@@ -524,10 +532,17 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
           </div>
 
           <div className="divider" style={{ margin: "20px 0" }} />
-          
+
           <div className="sec-label">Assistant LLM</div>
-          <LLMConfigBlock config={directive.llm} onChange={llm => setDirective({ ...directive, llm })} />
-          
+          <LLMConfigBlock
+            label="ASSISTANT LLM"
+            provider={directive.llm.provider}
+            url={directive.llm.url}
+            model={directive.llm.model}
+            apiKey={directive.llm.apiKey}
+            onChange={setLlmField}
+          />
+
           <div style={{ marginTop: 24 }}>
             <button className="btn btn-teal" style={{ width: "100%", justifyContent: "center", padding: "12px" }} onClick={handleSend} disabled={isRunning}>
               {isRunning ? "SENDING INSTRUCTIONS..." : "▶ SEND INSTRUCTIONS"}
@@ -573,7 +588,7 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
             {isRunning && <div className="badge pulse-anim" style={{ background: "var(--accent-teal)", color: "#000" }}>WORKING</div>}
           </div>
         </div>
-        
+
         <div
           ref={mailboxScrollRef}
           onScroll={handleMailboxScroll}
@@ -680,10 +695,10 @@ export default function DirectivesPanel({ onArtifact, professorName, onFocusChan
           )}
           {emails.length === 0 && !isRunning && (
             <div style={{ margin: "auto", color: "var(--text-ghost)", fontSize: 11, textAlign: "center" }}>
-              No mailbox updates yet.<br/>Open a workflow to brief the AI research assistants.
+              No mailbox updates yet.<br />Open a workflow to brief the AI research assistants.
             </div>
           )}
-          
+
           <div ref={emailsEndRef} />
         </div>
       </div>

@@ -265,7 +265,6 @@ class AgentMemory:
             raw = backend.complete(
                 system=_CONSOLIDATION_PROMPT,
                 messages=messages,
-                max_tokens=1024,
             )
             m = re.search(r"\{.*\}", raw, re.DOTALL)
             if not m:

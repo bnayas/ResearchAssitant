@@ -1,9 +1,45 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { literatureRun } from "./api.js";
+import { literatureStream } from "./api.js";
 import LLMConfigBlock from "./LLMConfigBlock.jsx";
 import { buildFocusLabel } from "./researchDeskState.js";
 
 const DEFAULT_QUERY = "";
+const SAVED_LATER_KEY = "literatureSavedForLater";
+const CONTEXT_KEY = "literatureContextPapers";
+
+function paperKey(paper) {
+  return paper?.url || paper?.arxiv_id || `${paper?.title || ""}-${paper?.year || ""}`;
+}
+
+function dedupePapers(papers) {
+  const seen = new Set();
+  const out = [];
+  for (const paper of papers || []) {
+    const key = paperKey(paper);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(paper);
+  }
+  return out;
+}
+
+function loadPaperList(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function downloadPaper(paper) {
+  const blob = new Blob([JSON.stringify(paper, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(paper.title || "paper").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "paper"}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 
 function Toggle({ on, onChange, label }) {
@@ -44,14 +80,34 @@ function StreamLine({ text, type = "normal" }) {
   );
 }
 
-function PaperCard({ paper, idx }) {
+function PaperCard({
+  paper,
+  idx,
+  variant = "accepted",
+  onInclude,
+  onSaveDesk,
+  onAddContext,
+  onSaveLater,
+  onDownload,
+}) {
   const [expanded, setExpanded] = useState(false);
+  const rejected = variant === "rejected";
+  const controlStyle = {
+    fontSize: 8,
+    padding: "4px 6px",
+    letterSpacing: 0.7,
+    whiteSpace: "nowrap",
+  };
   return (
-    <div className="paper-card slide-up" style={{ animationDelay: `${idx * 0.05}s` }}>
+    <div className="paper-card slide-up" style={{
+      animationDelay: `${idx * 0.05}s`,
+      borderColor: rejected ? "rgba(244,63,94,0.22)" : undefined,
+    }}>
       <div className="paper-title">{paper.title || "(no title)"}</div>
       <div className="paper-meta">
         {paper.year && <span className="badge" style={{ color: "var(--accent-blue)", background: "rgba(96,165,250,0.1)" }}>{paper.year}</span>}
         {paper.source && <span className="badge" style={{ color: "var(--text-faint)", background: "var(--bg-base)" }}>{paper.source}</span>}
+        {rejected && <span className="badge" style={{ color: "var(--accent-red)", background: "rgba(244,63,94,0.08)" }}>REJECTED</span>}
         {paper.url && (
           <a href={paper.url} target="_blank" rel="noreferrer"
             style={{ fontSize: 9, color: "var(--accent-gold)", fontFamily: "var(--font-mono)", textDecoration: "none" }}>
@@ -59,6 +115,16 @@ function PaperCard({ paper, idx }) {
           </a>
         )}
       </div>
+      {paper.authors?.length > 0 && (
+        <div style={{ fontSize: 9, color: "var(--text-faint)", fontFamily: "var(--font-mono)", lineHeight: 1.5, marginTop: 4 }}>
+          {paper.authors.slice(0, 5).join(", ")}
+        </div>
+      )}
+      {rejected && paper.scope_violation_reason && (
+        <div style={{ fontSize: 9, color: "var(--accent-red)", fontFamily: "var(--font-mono)", lineHeight: 1.5, marginTop: 4 }}>
+          {paper.scope_violation_reason}
+        </div>
+      )}
       {paper.abstract && (
         <>
           <div className="paper-abstract" style={{ WebkitLineClamp: expanded ? undefined : 3, overflow: expanded ? "visible" : "hidden", display: expanded ? "block" : "-webkit-box" }}>
@@ -70,11 +136,18 @@ function PaperCard({ paper, idx }) {
           </button>
         </>
       )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        {rejected && <button className="btn" style={controlStyle} onClick={() => onInclude?.(paper)}>OVERRULE AUDIT</button>}
+        <button className="btn" style={controlStyle} onClick={() => onSaveDesk?.(paper)}>SAVE TO DESK</button>
+        <button className="btn" style={controlStyle} onClick={() => onAddContext?.(paper)}>ADD TO CONTEXT</button>
+        <button className="btn" style={controlStyle} onClick={() => onSaveLater?.(paper)}>SAVE TO LATER</button>
+        <button className="btn" style={controlStyle} onClick={() => onDownload?.(paper)}>DOWNLOAD</button>
+      </div>
     </div>
   );
 }
 
-export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, onAttachToDesk }) {
+export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, onAttachToDesk, isActive = true }) {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [includeTopics, setIncludeTopics] = useState("");
   const [excludeTopics, setExcludeTopics] = useState("");
@@ -133,6 +206,9 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
   const [result, setResult]     = useState(null); // { artifact, audit }
   const [error, setError]       = useState(null);
   const [showConfig, setShowConfig] = useState(true);
+  const [manualIncluded, setManualIncluded] = useState([]);
+  const [contextPapers, setContextPapers] = useState(() => loadPaperList(CONTEXT_KEY));
+  const [savedLater, setSavedLater] = useState(() => loadPaperList(SAVED_LATER_KEY));
 
   const logRef = useRef(null);
   const addLog = useCallback((text, type = "normal") => {
@@ -143,14 +219,23 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
+  useEffect(() => {
+    localStorage.setItem(CONTEXT_KEY, JSON.stringify(contextPapers));
+  }, [contextPapers]);
+
+  useEffect(() => {
+    localStorage.setItem(SAVED_LATER_KEY, JSON.stringify(savedLater));
+  }, [savedLater]);
+
   // Sync with global LLM changes
   useEffect(() => {
     if (globalLLM) setLlm(p => ({ ...p, ...globalLLM }));
   }, [globalLLM]);
 
   useEffect(() => {
+    if (!isActive) return;
     onFocusChange?.(buildFocusLabel(query, includeTopics));
-  }, [query, includeTopics, onFocusChange]);
+  }, [query, includeTopics, onFocusChange, isActive]);
 
   const handleRun = async () => {
     if (running) return;
@@ -164,6 +249,7 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
     setRunning(true);
     setError(null);
     setResult(null);
+    setManualIncluded([]);
     setLogs([]);
     setShowConfig(false);
 
@@ -190,28 +276,83 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
     addLog(`Backends: ${[useArxiv && "ArXiv", useSSch && "Semantic Scholar", usePerplexity && "Perplexity"].filter(Boolean).join(", ")}`, "normal");
 
     try {
-      // The sync endpoint blocks until done — we show a spinner
-      addLog("Searching and synthesising (this may take 30–120s)…", "normal");
-      const data = await literatureRun(req);
-      addLog("Literature review complete.", "phase");
-
-      const art = data?.artifact || {};
-      // Backend returns art.papers[] with in_scope boolean on each
-      const allPapers = art.papers || [];
-      const accepted  = allPapers.filter(p => p.in_scope !== false);
-      const rejected  = allPapers.filter(p => p.in_scope === false).length;
-      addLog(`Accepted ${accepted.length} paper(s), rejected ${rejected}.`, "normal");
-      if (art.synthesis) addLog("Synthesis generated.", "normal");
-
-      const audit = data?.audit || {};
-      if (audit.passed === false) {
-        addLog(`Audit: FAILED — ${audit.issues?.length || 0} issue(s).`, "error");
-      } else {
-        addLog("Audit: PASSED.", "normal");
-      }
-
-      setResult(data);
-      if (onArtifact) onArtifact("literature", data);
+      addLog("Searching and synthesising with live results…", "normal");
+      setResult({ artifact: { papers: [], removed_papers: [], synthesis: "", status: "running" }, audit: null });
+      let streamError = null;
+      await literatureStream(req, item => {
+        if (item.kind === "error") {
+          streamError = new Error(item.text || "Literature stream failed");
+          return;
+        }
+        if (item.kind === "complete") {
+          const data = item.data;
+          const art = data?.artifact || {};
+          const accepted = (art.papers || []).filter(p => p.in_scope !== false);
+          const rejected = (art.removed_papers || []).length + (art.papers || []).filter(p => p.in_scope === false).length;
+          setResult(data);
+          addLog("Literature review complete.", "phase");
+          addLog(`Accepted ${accepted.length} paper(s), rejected ${rejected}.`, "normal");
+          if (art.synthesis) addLog("Synthesis generated.", "normal");
+          const audit = data?.audit || {};
+          if (audit.passed === false) {
+            addLog(`Audit: FAILED — ${(audit.issues || audit.scope_violations_found || []).length} issue(s).`, "error");
+          } else {
+            addLog("Audit: PASSED.", "normal");
+          }
+          onArtifact?.("literature", data);
+          return;
+        }
+        if (item.kind !== "event") return;
+        const event = item.event || {};
+        const payload = event.payload || {};
+        if (event.event_type === "lookup_plan") {
+          const authors = payload.required_authors?.length ? ` | authors: ${payload.required_authors.join(", ")}` : "";
+          const years = payload.year_constraints?.preferred_year ? ` | year: ${payload.year_constraints.preferred_year}` : "";
+          addLog(`Lookup target: ${payload.article_target || "(not specified)"}${authors}${years}`, "normal");
+          if (payload.task_intent) addLog(`Parse intention: ${payload.task_intent}`, "normal");
+          if (payload.excluded_search_terms?.length) addLog(`Excluded from search: ${payload.excluded_search_terms.join(", ")}`, "normal");
+        } else if (event.event_type === "query_generated") {
+          addLog(`Query ${payload.index}: ${payload.query || "(empty)"}${payload.rationale ? ` — ${payload.rationale}` : ""}`, "normal");
+        } else if (event.event_type === "search_round_start") {
+          addLog(`Round ${payload.round}: ${payload.keywords?.map(s => s.join(" + ")).join(" | ") || "search"}${payload.authors?.length ? ` | authors: ${payload.authors.join(", ")}` : ""}`, "normal");
+        } else if (event.event_type === "keyword_refined") {
+          addLog(`Refined keywords: ${payload.keywords?.map(s => s.join(" + ")).join(" | ") || "none"}`, "normal");
+        } else if (event.event_type === "title_found") {
+          const paper = { ...payload, in_scope: true };
+          addLog(`Accepted: ${paper.title || "(untitled)"}${paper.year ? ` (${paper.year})` : ""}${paper.authors?.length ? ` — ${paper.authors.join(", ")}` : ""}`, "normal");
+          setResult(prev => {
+            const base = prev || { artifact: { papers: [], removed_papers: [], synthesis: "" }, audit: null };
+            const art = base.artifact || {};
+            return {
+              ...base,
+              artifact: {
+                ...art,
+                papers: dedupePapers([...(art.papers || []), paper]),
+              },
+            };
+          });
+        } else if (event.event_type === "scope_removed") {
+          const paper = {
+            ...payload,
+            in_scope: false,
+            scope_violation_reason: payload.reason || payload.scope_violation_reason,
+          };
+          setResult(prev => {
+            const base = prev || { artifact: { papers: [], removed_papers: [], synthesis: "" }, audit: null };
+            const art = base.artifact || {};
+            return {
+              ...base,
+              artifact: {
+                ...art,
+                removed_papers: dedupePapers([...(art.removed_papers || []), paper]),
+              },
+            };
+          });
+        } else if (event.event_type === "round_summary") {
+          addLog(`Round ${payload.round}: raw=${payload.raw}, accepted=${payload.in_scope}, validated=${payload.validated}, skipped=${payload.skipped_prefilter}.`, "normal");
+        }
+      });
+      if (streamError) throw streamError;
     } catch (err) {
       setError(err.message);
       addLog(err.message, "error");
@@ -220,10 +361,39 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
     }
   };
 
+  const handleIncludeRejected = paper => {
+    const included = {
+      ...paper,
+      in_scope: true,
+      audit_overridden: true,
+      scope_violation_reason: null,
+    };
+    setManualIncluded(prev => dedupePapers([...prev, included]));
+    addLog(`Audit overruled: ${paper.title || "(untitled)"}`, "normal");
+  };
+
+  const handleSaveDesk = paper => {
+    onAttachToDesk?.("", [paper]);
+    addLog(`Saved to desk: ${paper.title || "(untitled)"}`, "normal");
+  };
+
+  const handleAddContext = paper => {
+    const next = dedupePapers([...contextPapers, paper]);
+    setContextPapers(next);
+    onArtifact?.("literature_context", { papers: next });
+    addLog(`Added to context: ${paper.title || "(untitled)"}`, "normal");
+  };
+
+  const handleSaveLater = paper => {
+    const next = dedupePapers([...savedLater, paper]);
+    setSavedLater(next);
+    addLog(`Saved for later: ${paper.title || "(untitled)"}`, "normal");
+  };
+
   const handleExport = () => {
     if (!result?.artifact) return;
     const art = result.artifact;
-    const papers = (art.papers || []).filter(p => p.in_scope !== false);
+    const papers = dedupePapers([...(art.papers || []).filter(p => p.in_scope !== false), ...manualIncluded]);
     const lines = [
       `# Literature Review: ${query}`,
       `**Date:** ${new Date().toISOString().slice(0, 10)}`,
@@ -245,8 +415,16 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
   };
 
   // All papers from result; split by in_scope flag
-  const allPapers   = result?.artifact?.papers || [];
-  const papers      = allPapers.filter(p => p.in_scope !== false);
+  const allPapers = result?.artifact?.papers || [];
+  const papers = dedupePapers([
+    ...allPapers.filter(p => p.in_scope !== false),
+    ...manualIncluded,
+  ]);
+  const acceptedPaperKeys = new Set(papers.map(paperKey));
+  const rejectedPapers = dedupePapers([
+    ...(result?.artifact?.removed_papers || []),
+    ...allPapers.filter(p => p.in_scope === false),
+  ]).filter(p => !acceptedPaperKeys.has(paperKey(p)));
   const synthesis   = result?.artifact?.synthesis || "";
 
   return (
@@ -410,14 +588,41 @@ export default function LitReviewPanel({ globalLLM, onArtifact, onFocusChange, o
                   ACCEPTED PAPERS ({papers.length})
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {papers.map((p, i) => <PaperCard key={p.url || i} paper={p} idx={i} />)}
+                  {papers.map((p, i) => (
+                    <PaperCard
+                      key={paperKey(p) || i}
+                      paper={p}
+                      idx={i}
+                      onSaveDesk={handleSaveDesk}
+                      onAddContext={handleAddContext}
+                      onSaveLater={handleSaveLater}
+                      onDownload={downloadPaper}
+                    />
+                  ))}
                 </div>
               </div>
 
-              {/* Rejected count */}
-              {allPapers.filter(p => p.in_scope === false).length > 0 && (
-                <div style={{ fontSize: 9, color: "var(--text-faint)", letterSpacing: 1 }}>
-                  {allPapers.filter(p => p.in_scope === false).length} paper(s) rejected by scope filter.
+              {/* Rejected papers */}
+              {rejectedPapers.length > 0 && (
+                <div>
+                  <div className="sec-label" style={{ color: "var(--accent-red)" }}>
+                    REJECTED PAPERS ({rejectedPapers.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {rejectedPapers.map((p, i) => (
+                      <PaperCard
+                        key={paperKey(p) || i}
+                        paper={p}
+                        idx={i}
+                        variant="rejected"
+                        onInclude={handleIncludeRejected}
+                        onSaveDesk={handleSaveDesk}
+                        onAddContext={handleAddContext}
+                        onSaveLater={handleSaveLater}
+                        onDownload={downloadPaper}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

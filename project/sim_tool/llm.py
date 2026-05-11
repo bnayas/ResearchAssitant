@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import json
 import logging
 import os
+import shutil
+import subprocess
 import urllib.request
 from typing import Optional
 
@@ -73,7 +75,7 @@ class LLMServiceConfig:
     model: str
     base_url: str = ""
     api_key: str = ""
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 300.0
 
     @property
     def is_openai_compatible(self) -> bool:
@@ -134,19 +136,19 @@ def _resolve_timeout_seconds(
     raw_value = (
         os.environ.get(_service_env_key(service, "TIMEOUT_SECONDS"))
         or os.environ.get("SIM_TOOL_LLM_TIMEOUT_SECONDS")
-        or "30"
+        or "300"
     )
     try:
         resolved = float(raw_value)
     except ValueError:
-        return 30.0
-    return resolved if resolved > 0 else 30.0
+        return 300.0
+    return resolved if resolved > 0 else 300.0
 
 
 def _discover_openai_compatible_model(base_url: str) -> str:
     models_url = f"{base_url.rstrip('/')}/models"
     req = urllib.request.Request(models_url, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=25) as response:
         payload = json.loads(response.read())
     data = payload.get("data") or []
     for item in data:
@@ -243,7 +245,7 @@ class LLMBackend(ABC):
     model_name: str = "base"
 
     @abstractmethod
-    def complete(self, system: str, messages: list, max_tokens: int = 4096,
+    def complete(self, system: str, messages: list, max_tokens: Optional[int] = None,
                  temperature: float = 0.0) -> str: ...
 
 
@@ -256,45 +258,133 @@ class AnthropicBackend(LLMBackend):
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self._timeout_seconds = timeout_seconds
 
-    def complete(self, system: str, messages: list, max_tokens: int = 4096,
+    def complete(self, system: str, messages: list, max_tokens: Optional[int] = None,
                  temperature: float = 0.0) -> str:
         import anthropic
         client = anthropic.Anthropic(api_key=self._api_key)
+        log.info(f"LLM Agent Request to {self.model_name}:\nSystem:\n{system}\nMessages:\n{json.dumps(messages, indent=2)}")
         msg = client.messages.create(
             model=self.model_name,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens or int(os.environ.get("ANTHROPIC_MAX_TOKENS", "4096")),
             system=system,
             messages=messages,
         )
-        return msg.content[0].text
+        content = msg.content[0].text
+        log.info(f"LLM Agent Response from {self.model_name}:\n{content}")
+        return content
 
 
 class OpenAICompatibleBackend(LLMBackend):
     def __init__(self, base_url: str = "http://localhost:1234/v1",
                  model: str = "auto", api_key: str = "",
-                 timeout_seconds: float = 30.0):
+                 timeout_seconds: float = 300.0):
         self.model_name = model
         self._base_url = base_url
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
 
-    def complete(self, system: str, messages: list, max_tokens: int = 4096,
+    def complete(self, system: str, messages: list, max_tokens: Optional[int] = None,
                  temperature: float = 0.0) -> str:
-        import urllib.request, json
-        payload = json.dumps({
-            "model": self.model_name, "max_tokens": max_tokens,
+        payload_obj = {
+            "model": self.model_name,
+            "temperature": temperature,
             "messages": [{"role": "system", "content": system}] + messages,
-        }).encode()
+        }
+        if max_tokens is not None:
+            payload_obj["max_tokens"] = max_tokens
+        if not self._api_key and self._is_local_endpoint():
+            payload_obj["reasoning"] = {"effort": "none"}
+            payload_obj["reasoning_effort"] = "none"
+        payload = json.dumps(payload_obj).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        url = f"{self._base_url.rstrip('/')}/chat/completions"
+        log.info(f"LLM Agent Request to {url} (model={self.model_name}):\nSystem:\n{system}\nMessages:\n{json.dumps(messages, indent=2)}")
+        if shutil.which("curl") and not self._api_key:
+            content = self._complete_with_curl(url, payload, headers)
+        else:
+            content = self._complete_with_urllib(url, payload, headers)
+        log.info(f"LLM Agent Response from {url} (model={self.model_name}):\n{content}")
+        return content
+
+    def _complete_with_curl(
+        self,
+        url: str,
+        payload: bytes,
+        headers: dict[str, str],
+    ) -> str:
+        timeout_seconds = max(float(self._timeout_seconds), 1.0)
+        cmd = [
+            "curl",
+            "-sS",
+            "--fail-with-body",
+            "--connect-timeout",
+            str(min(10.0, timeout_seconds)),
+            "--max-time",
+            str(timeout_seconds),
+        ]
+        for key, value in headers.items():
+            cmd.extend(["-H", f"{key}: {value}"])
+        cmd.extend(["--data-binary", "@-", url])
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=payload,
+                capture_output=True,
+                timeout=timeout_seconds + 2.0,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                f"LLM request to {url} exceeded {timeout_seconds:.1f}s"
+            ) from exc
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+            body = proc.stdout.decode("utf-8", errors="replace").strip()
+            detail = body or stderr or f"curl exited with {proc.returncode}"
+            if proc.returncode == 28:
+                raise TimeoutError(
+                    f"LLM request to {url} exceeded {timeout_seconds:.1f}s"
+                )
+            raise LLMError(f"LLM request failed: {detail[:500]}")
+        data = json.loads(proc.stdout)
+        return self._extract_message_content(data, url)
+
+    def _complete_with_urllib(
+        self,
+        url: str,
+        payload: bytes,
+        headers: dict[str, str],
+    ) -> str:
         req = urllib.request.Request(
-            f"{self._base_url.rstrip('/')}/chat/completions",
-            data=payload, headers=headers,
+            url,
+            data=payload,
+            headers=headers,
         )
         with urllib.request.urlopen(req, timeout=self._timeout_seconds) as r:
             data = json.loads(r.read())
-        return data["choices"][0]["message"]["content"]
+        return self._extract_message_content(data, url)
+
+    def _extract_message_content(self, data: dict, url: str) -> str:
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        content = str(message.get("content") or "")
+        if content.strip():
+            return content
+        reasoning = str(message.get("reasoning_content") or "")
+        finish_reason = str(choice.get("finish_reason") or "")
+        if reasoning.strip():
+            raise LLMError(
+                "LLM returned empty content with reasoning_content "
+                f"(finish_reason={finish_reason or 'unknown'}) from {url}. "
+                "Retry with a constrained no-reasoning JSON prompt or increase max_tokens."
+            )
+        raise LLMError(f"LLM returned empty content from {url}")
+
+    def _is_local_endpoint(self) -> bool:
+        normalized = self._base_url.lower()
+        return "localhost" in normalized or "127.0.0.1" in normalized or "[::1]" in normalized
 
 
 def make_backend(provider: Optional[str] = None, **kwargs) -> LLMBackend:

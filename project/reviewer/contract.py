@@ -56,7 +56,7 @@ class MathCheckRequest:
     claim_text: str
     context: str
     line_number: int
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 300.0
 
     @staticmethod
     def new(section_id: str, kind: MathClaimKind, claim_text: str,

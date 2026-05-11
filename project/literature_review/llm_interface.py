@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 
 class AsyncLLMBackend(ABC):
@@ -27,7 +27,7 @@ class AsyncLLMBackend(ABC):
         self,
         system: str,
         messages: list[dict[str, str]],
-        max_tokens: int = 1024,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.0,
     ) -> str:
         """
@@ -58,7 +58,7 @@ class ThreadedAsyncAdapter(AsyncLLMBackend):
         self,
         system: str,
         messages: list[dict[str, str]],
-        max_tokens: int = 1024,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.0,
     ) -> str:
         return await asyncio.to_thread(
@@ -80,7 +80,7 @@ class DirectAsyncBackend(AsyncLLMBackend):
         self,
         system: str,
         messages: list[dict[str, str]],
-        max_tokens: int = 1024,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.0,
     ) -> str:
         raise NotImplementedError

@@ -269,10 +269,18 @@ class TestArXivParser:
         from literature_review.search_backends.arxiv_backend import ArXivBackend
 
         cls = ArXivBackend
-        old_state = (cls._cooldown_until, cls._last_skip_log_at, cls._next_request_at)
+        old_state = (
+            cls._cooldown_until,
+            cls._temporary_unavailable_until,
+            cls._last_skip_log_at,
+            cls._last_unavailable_skip_log_at,
+            cls._next_request_at,
+        )
         try:
             cls._cooldown_until = 0.0
+            cls._temporary_unavailable_until = 0.0
             cls._last_skip_log_at = 0.0
+            cls._last_unavailable_skip_log_at = 0.0
             cls._next_request_at = 0.0
             backend = ArXivBackend()
             backend._fetch_with_retry = AsyncMock(side_effect=AssertionError("cooldown should skip fetching"))
@@ -283,7 +291,47 @@ class TestArXivParser:
             backend._fetch_with_retry.assert_not_awaited()
             assert backend._last_rate_limited is True
         finally:
-            cls._cooldown_until, cls._last_skip_log_at, cls._next_request_at = old_state
+            (
+                cls._cooldown_until,
+                cls._temporary_unavailable_until,
+                cls._last_skip_log_at,
+                cls._last_unavailable_skip_log_at,
+                cls._next_request_at,
+            ) = old_state
+
+    def test_timeout_cooldown_skips_followup_requests(self):
+        from literature_review.search_backends.arxiv_backend import ArXivBackend
+
+        cls = ArXivBackend
+        old_state = (
+            cls._cooldown_until,
+            cls._temporary_unavailable_until,
+            cls._last_skip_log_at,
+            cls._last_unavailable_skip_log_at,
+            cls._next_request_at,
+        )
+        try:
+            cls._cooldown_until = 0.0
+            cls._temporary_unavailable_until = 0.0
+            cls._last_skip_log_at = 0.0
+            cls._last_unavailable_skip_log_at = 0.0
+            cls._next_request_at = 0.0
+            backend = ArXivBackend()
+            backend._fetch_with_retry = AsyncMock(side_effect=AssertionError("temporary cooldown should skip fetching"))
+            backend._mark_temporarily_unavailable(wait_seconds=60)
+            papers = asyncio.run(backend.search(["neutral model"], max_results=5))
+            assert papers == []
+            backend._fetch_with_retry.assert_not_awaited()
+            assert backend._last_temporarily_unavailable is True
+            assert backend._last_rate_limited is False
+        finally:
+            (
+                cls._cooldown_until,
+                cls._temporary_unavailable_until,
+                cls._last_skip_log_at,
+                cls._last_unavailable_skip_log_at,
+                cls._next_request_at,
+            ) = old_state
 
 
 class TestSemanticScholarBackend:

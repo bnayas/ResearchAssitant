@@ -208,7 +208,7 @@ def test_mediated_workflow_routes_agent_question_answers_back_to_same_session(tm
     assert literature.find_task.metadata["article_lookup_query"] == "refined query"
 
 
-def test_mediated_workflow_asks_for_generic_simulation_target_selection(tmp_path):
+def test_mediated_workflow_asks_for_generic_inquiry_selection(tmp_path):
     registry = ArtifactRegistry(root_dir=tmp_path)
     mailbox = PIMailbox(output_dir=tmp_path)
     flow = FlowManagementService()
@@ -241,9 +241,17 @@ def test_mediated_workflow_asks_for_generic_simulation_target_selection(tmp_path
                 filename="article/article_brief.json",
                 payload={
                     "model_description": "Two reproducible variants are described.",
-                    "simulation_targets": [
-                        {"name": "First target", "description": "Baseline variant."},
-                        {"name": "Second target", "description": "Extended variant."},
+                    "inquiries": [
+                        {
+                            "id": "model_scope",
+                            "kind": "selection",
+                            "question": "Which model variant should be reproduced?",
+                            "applies_to": ["simulation"],
+                            "options": [
+                                {"label": "First target", "description": "Baseline variant.", "value": {"model": "first"}},
+                                {"label": "Second target", "description": "Extended variant.", "value": {"model": "second"}},
+                            ],
+                        },
                     ],
                     "key_parameters": {},
                     "procedure": "Use the reported procedure.",
@@ -252,9 +260,17 @@ def test_mediated_workflow_asks_for_generic_simulation_target_selection(tmp_path
                 summary="Brief",
                 metadata={
                     "model_description": "Two reproducible variants are described.",
-                    "simulation_targets": [
-                        {"name": "First target", "description": "Baseline variant."},
-                        {"name": "Second target", "description": "Extended variant."},
+                    "inquiries": [
+                        {
+                            "id": "model_scope",
+                            "kind": "selection",
+                            "question": "Which model variant should be reproduced?",
+                            "applies_to": ["simulation"],
+                            "options": [
+                                {"label": "First target", "description": "Baseline variant.", "value": {"model": "first"}},
+                                {"label": "Second target", "description": "Extended variant.", "value": {"model": "second"}},
+                            ],
+                        },
                     ],
                 },
                 artifact_id="article-brief",
@@ -323,8 +339,8 @@ def test_mediated_workflow_asks_for_generic_simulation_target_selection(tmp_path
     worker = threading.Thread(target=runner.run_all_phases, daemon=True)
     worker.start()
     pending = _wait_for_pending_steering(flow, directive.directive_id)
-    assert pending["request_kind"] == "selection"
-    assert pending["session_id"] == "dir-target-selection-simulation-scope"
+    assert pending["request_kind"] == "inquiry"
+    assert pending["session_id"] == "dir-target-selection-inquiry-model_scope"
 
     flow.inject_context(
         pending["session_id"],
@@ -333,9 +349,11 @@ def test_mediated_workflow_asks_for_generic_simulation_target_selection(tmp_path
     )
     worker.join(timeout=5)
     assert not worker.is_alive()
-    selected = simulation.task.metadata["selected_simulation_targets"]
+    resolved = simulation.task.metadata["resolved_inquiries"]
+    assert resolved[0]["id"] == "model_scope"
+    selected = resolved[0]["selected_options"]
     assert len(selected) == 1
-    assert selected[0]["name"] == "Second target"
+    assert selected[0]["label"] == "Second target"
 
 
 def _wait_for_pending_steering(flow: FlowManagementService, workflow_id: str, timeout: float = 5.0) -> dict:

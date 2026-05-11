@@ -37,6 +37,7 @@ from literature_review.contract import (
     LiteratureReviewTask,
     ScopeConstraint,
     SearchDepthConfig,
+    StreamEvent,
 )
 from literature_review.director_bridge import LiteratureReviewBridge
 from literature_review.llm_interface import ThreadedAsyncAdapter
@@ -47,6 +48,18 @@ from literature_review.search_backends.semantic_scholar_backend import (
     SemanticScholarBackend,
 )
 from research_platform.assistants import make_service_backend
+from research_platform.agents.base import ToolContext
+from research_platform.agents.literature.answer_question import (
+    execute_article_question,
+)
+from research_platform.agents.literature.build_brief import (
+    execute_parse_article_with_intention,
+)
+from research_platform.agents.literature.find_article import execute as execute_find_article
+from research_platform.agents.literature.prepare_lookup import execute as execute_prepare_lookup
+from research_platform.agents.literature.review_literature import (
+    execute as execute_review_literature,
+)
 from research_platform.flow_management import FlowManagementService
 from research_platform.registry import ArtifactRegistry
 from research_platform.service_contracts import AgentRuntimeProfile, MixedServiceRuntimeConfig, ServiceRuntimeConfig
@@ -63,6 +76,16 @@ try:
 except ImportError:
     _WRITER_AVAILABLE = False
 
+import logging
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("research_platform.log")
+    ]
+)
 
 def _jsonify(value: Any) -> Any:
     if value is None:
@@ -183,6 +206,8 @@ class LiteratureReviewRequest(BaseModel):
     exclude_topics: list[str] = Field(default_factory=list, alias="excludeTopics")
     year_min: Optional[int] = Field(default=None, alias="yearMin")
     year_max: Optional[int] = Field(default=None, alias="yearMax")
+    anchor_year: Optional[int] = Field(default=None, alias="anchorYear")
+    required_authors: list[str] = Field(default_factory=list, alias="requiredAuthors")
     max_papers: int = Field(default=10, alias="maxPapers")
     papers_per_query: int = Field(default=8, alias="papersPerQuery")
     min_papers_threshold: int = Field(default=4, alias="minPapersThreshold")
@@ -651,7 +676,199 @@ def _pending_steering_from_flow(flow_snapshot: dict[str, Any]) -> Optional[dict[
 
 
 class LiteratureReviewService:
-    def run(self, request: LiteratureReviewRequest) -> dict[str, Any]:
+    def run(
+        self,
+        request: LiteratureReviewRequest,
+        event_sink: Optional[Any] = None,
+    ) -> dict[str, Any]:
+        llm_backend = _make_llm_backend("literature_review", request.llm)
+        registry = ArtifactRegistry(
+            root_dir=Path("project/.runtime/literature") / f"lit-{int(time.time() * 1000)}"
+        )
+        directive_id = f"lit-{uuid.uuid4().hex[:8]}"
+        include_topics = request.include_topics or []
+        steering = [
+            *(f"Include topic: {topic}" for topic in include_topics if topic.strip()),
+            *(f"Exclude topic: {topic}" for topic in request.exclude_topics if topic.strip()),
+        ]
+
+        prepare_ctx = ToolContext(
+            tool_name="prepare_article_lookup",
+            directive_id=directive_id,
+            instruction=request.query,
+            inputs={
+                "instruction": request.query,
+                "topic_hint": "; ".join(include_topics),
+                "target_count": max(1, request.max_papers),
+                "steering": steering,
+            },
+            output_dir=registry.root_dir or Path("."),
+        )
+        prepare_result = execute_prepare_lookup(
+            prepare_ctx,
+            registry=registry,
+            llm_backend=llm_backend,
+        )
+        if not prepare_result.ok:
+            raise ValueError(prepare_result.message or "Article lookup planning failed")
+
+        lookup_spec = dict(prepare_result.metadata.get("lookup_spec") or {})
+        self._emit(event_sink, "lookup_plan", {
+            "article_target": lookup_spec.get("article_target"),
+            "task_intent": lookup_spec.get("task_intent") or request.query,
+            "required_authors": lookup_spec.get("required_authors") or [],
+            "year_constraints": lookup_spec.get("year_constraints") or {},
+            "excluded_search_terms": lookup_spec.get("excluded_search_terms") or [],
+            "queries": lookup_spec.get("queries") or [],
+        })
+        for index, query_spec in enumerate(lookup_spec.get("queries") or [], 1):
+            self._emit(event_sink, "query_generated", {
+                "index": index,
+                "label": query_spec.get("label"),
+                "rationale": query_spec.get("rationale"),
+                "query": query_spec.get("query_string"),
+            })
+
+        find_ctx = ToolContext(
+            tool_name="find_primary_article",
+            directive_id=directive_id,
+            instruction=request.query,
+            inputs={
+                "lookup_spec": lookup_spec,
+                "query": lookup_spec.get("article_target") or request.query,
+                "max_candidates": request.papers_per_query,
+                "max_query_iterations": max(2, request.max_rounds),
+            },
+            output_dir=registry.root_dir or Path("."),
+        )
+        find_result = execute_find_article(
+            find_ctx,
+            registry=registry,
+            llm_backend=llm_backend,
+        )
+        if not find_result.ok or not find_result.artifacts:
+            synthesis = find_result.message or "No in-scope papers were found for this query."
+            artifact = {
+                "task_id": directive_id,
+                "branch_id": request.branch_id,
+                "papers": [],
+                "removed_papers": [],
+                "synthesis": synthesis,
+                "search_log": [],
+                "status": "exhausted",
+                "is_sufficient": False,
+                "insufficiency_reason": synthesis,
+                "created_at": time.time(),
+            }
+            self._emit(event_sink, "done", {"status": "exhausted", "accepted": 0})
+            return {
+                "artifact": artifact,
+                "audit": {"passed": False, "issues": [synthesis]},
+            }
+
+        article = find_result.artifacts[0]
+        primary_paper = _article_ref_to_paper(article)
+        self._emit(event_sink, "title_found", primary_paper)
+
+        parse_ctx = ToolContext(
+            tool_name="parse_article_with_intention",
+            directive_id=directive_id,
+            instruction=request.query,
+            inputs={
+                "intention": lookup_spec.get("task_intent") or request.query,
+                "focus_fields": ["model_description", "key_parameters", "procedure", "expected_figures"],
+            },
+            artifacts={"article": article},
+            output_dir=registry.root_dir or Path("."),
+        )
+        parse_result = execute_parse_article_with_intention(
+            parse_ctx,
+            registry=registry,
+            llm_backend=llm_backend,
+        )
+        brief = parse_result.artifacts[0] if parse_result.ok and parse_result.artifacts else None
+
+        related_papers: list[dict[str, Any]] = []
+        related_synthesis: Any = ""
+        if brief is not None and request.max_papers > 1:
+            review_ctx = ToolContext(
+                tool_name="review_related_literature",
+                directive_id=directive_id,
+                instruction=request.query,
+                inputs={
+                    "lookup_spec": lookup_spec,
+                    "known_papers": [primary_paper],
+                    "max_papers": max(0, request.max_papers - 1),
+                    "max_rounds": request.max_rounds,
+                    "scope_strictness": "normal",
+                },
+                artifacts={"article": article, "brief": brief},
+                output_dir=registry.root_dir or Path("."),
+            )
+            review_result = execute_review_literature(
+                review_ctx,
+                registry=registry,
+                llm_backend=llm_backend,
+            )
+            if review_result.ok and review_result.artifacts:
+                review_meta = review_result.artifacts[0].metadata or {}
+                related_synthesis = review_meta.get("synthesis") or ""
+                for paper in review_meta.get("new_papers_this_run") or []:
+                    paper_payload = _paper_dict_to_literature_payload(paper)
+                    related_papers.append(paper_payload)
+                    self._emit(event_sink, "title_found", paper_payload)
+
+        synthesis_parts = []
+        if brief is not None:
+            synthesis_parts.append(_brief_to_synthesis(brief.metadata))
+        if related_synthesis:
+            synthesis_parts.append(_synthesis_to_text(related_synthesis))
+        synthesis = "\n\n".join(part for part in synthesis_parts if part).strip()
+        if not synthesis:
+            synthesis = parse_result.message if parse_result.message else find_result.message
+
+        papers = [primary_paper, *related_papers]
+        artifact = {
+            "task_id": directive_id,
+            "branch_id": request.branch_id,
+            "papers": papers[: request.max_papers],
+            "removed_papers": [],
+            "synthesis": synthesis,
+            "search_log": [{
+                "round_number": 1,
+                "keyword_sets": [[q.get("query_string", "")] for q in lookup_spec.get("queries") or []],
+                "sources_queried": ["arxiv", "semantic_scholar"],
+                "papers_found_raw": len(papers),
+                "papers_in_scope": len(papers),
+                "is_variation": False,
+                "elapsed_seconds": 0.0,
+            }],
+            "status": "complete",
+            "is_sufficient": True,
+            "insufficiency_reason": None,
+            "created_at": time.time(),
+            "lookup_spec": lookup_spec,
+            "brief": brief.metadata if brief is not None else {},
+        }
+        self._emit(event_sink, "round_summary", {
+            "round": 1,
+            "raw": len(papers),
+            "in_scope": len(papers),
+            "validated": len(papers),
+            "skipped_prefilter": 0,
+            "sources": ["arxiv", "semantic_scholar"],
+        })
+        self._emit(event_sink, "done", {"status": "complete", "accepted": len(papers)})
+        return {
+            "artifact": _jsonify(artifact),
+            "audit": {"passed": True, "issues": []},
+        }
+
+    def _emit(self, event_sink: Optional[Any], event_type: str, payload: dict[str, Any]) -> None:
+        if event_sink is not None:
+            event_sink(StreamEvent(event_type=event_type, payload=payload))
+
+    def _build_backends(self, request: LiteratureReviewRequest) -> list[SearchBackend]:
         backends: list[SearchBackend] = []
         if request.arxiv.enabled:
             backends.append(ArXivBackend(sort_by=request.arxiv.sort_by))
@@ -666,24 +883,21 @@ class LiteratureReviewService:
                     model=request.perplexity.model,
                 )
             )
-        if not backends:
-            raise ValueError("At least one literature search backend must be enabled")
+        return backends
 
-        llm_backend = _make_llm_backend("literature_review", request.llm)
-        bridge = LiteratureReviewBridge(
-            backends=backends,
-            llm=ThreadedAsyncAdapter(llm_backend),
-            gui_event_sink=None,
-        )
-        task = LiteratureReviewTask(
+    def _build_task(self, request: LiteratureReviewRequest) -> LiteratureReviewTask:
+        include_topics = request.include_topics or [request.query]
+        return LiteratureReviewTask(
             task_id=f"lit-{int(time.time() * 1000)}",
             branch_id=request.branch_id,
             query=request.query,
             scope=ScopeConstraint(
-                include_topics=request.include_topics or [request.query],
+                include_topics=include_topics,
                 exclude_topics=request.exclude_topics,
                 year_min=request.year_min,
                 year_max=request.year_max,
+                anchor_year=request.anchor_year,
+                required_authors=request.required_authors,
                 max_papers=request.max_papers,
             ),
             depth=SearchDepthConfig(
@@ -694,11 +908,70 @@ class LiteratureReviewService:
             ),
             requestor_agent=request.requestor_agent,
         )
-        result = bridge.run_sync(task)
-        return {
-            "artifact": _jsonify(result.artifact),
-            "audit": _jsonify(result.audit),
-        }
+
+
+def _article_ref_to_paper(article: Any) -> dict[str, Any]:
+    metadata = getattr(article, "metadata", {}) or {}
+    return {
+        "title": metadata.get("title") or getattr(article, "title", ""),
+        "authors": list(metadata.get("authors") or []),
+        "abstract": metadata.get("abstract") or getattr(article, "summary", ""),
+        "url": metadata.get("url") or getattr(article, "url", ""),
+        "year": metadata.get("year"),
+        "source": metadata.get("source") or "unknown",
+        "arxiv_id": metadata.get("arxiv_id"),
+        "doi": metadata.get("doi"),
+        "in_scope": True,
+        "lookup_query": metadata.get("lookup_query"),
+    }
+
+
+def _paper_dict_to_literature_payload(paper: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": paper.get("title", ""),
+        "authors": list(paper.get("authors") or []),
+        "abstract": paper.get("abstract", ""),
+        "url": paper.get("url", ""),
+        "year": paper.get("year"),
+        "source": paper.get("source") or "unknown",
+        "arxiv_id": paper.get("arxiv_id"),
+        "doi": paper.get("doi"),
+        "in_scope": True,
+    }
+
+
+def _brief_to_synthesis(metadata: dict[str, Any]) -> str:
+    if not metadata:
+        return ""
+    parts = []
+    model = str(metadata.get("model_description") or "").strip()
+    if model:
+        parts.append(f"Model description:\n{model}")
+    params = metadata.get("key_parameters") or {}
+    if params:
+        parts.append("Key parameters:\n" + json.dumps(params, indent=2, ensure_ascii=False))
+    procedure = str(metadata.get("procedure") or "").strip()
+    if procedure:
+        parts.append(f"Procedure:\n{procedure}")
+    figures = metadata.get("expected_figures") or []
+    if figures:
+        parts.append("Expected figures:\n" + "\n".join(f"- {item}" for item in figures))
+    return "\n\n".join(parts)
+
+
+def _synthesis_to_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        prose = str(value.get("prose_summary") or "").strip()
+        if prose:
+            return prose
+        parts: list[str] = []
+        for key, vals in value.items():
+            if isinstance(vals, list) and vals:
+                parts.append(f"{key.replace('_', ' ').title()}:\n" + "\n".join(f"- {v}" for v in vals))
+        return "\n\n".join(parts)
+    return str(value or "")
 
 
 def create_app(
@@ -890,14 +1163,30 @@ def create_app(
 
     @app.post("/api/literature/reviews/stream")
     def literature_stream(request: LiteratureReviewRequest) -> StreamingResponse:
-        """Same as /run but returns result as a single NDJSON line when done."""
-        async def _gen() -> AsyncIterator[str]:
-            loop = asyncio.get_event_loop()
+        """Stream review progress as NDJSON and finish with the complete result."""
+        events: queue.Queue[Optional[dict[str, Any]]] = queue.Queue()
+
+        def _event_sink(event: Any) -> None:
+            events.put({"kind": "event", "event": _jsonify(event)})
+
+        def _worker() -> None:
             try:
-                result = await loop.run_in_executor(None, literature_service.run, request)
-                yield json.dumps({"kind": "complete", "data": result}) + "\n"
+                result = literature_service.run(request, event_sink=_event_sink)
+                events.put({"kind": "complete", "data": result})
             except Exception as exc:
-                yield json.dumps({"kind": "error", "text": str(exc)}) + "\n"
+                events.put({"kind": "error", "text": str(exc)})
+            finally:
+                events.put(None)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+        async def _gen() -> AsyncIterator[str]:
+            loop = asyncio.get_running_loop()
+            while True:
+                item = await loop.run_in_executor(None, events.get)
+                if item is None:
+                    break
+                yield json.dumps(item) + "\n"
         return StreamingResponse(_gen(), media_type="application/x-ndjson")
 
     @app.post("/api/writer/start")

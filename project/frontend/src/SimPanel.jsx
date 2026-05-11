@@ -91,7 +91,7 @@ function TextGate({ title, content, primaryLabel, primaryColor, onPrimary, secon
   );
 }
 
-export default function SimPanel({ globalLLM, onArtifact, onFocusChange }) {
+export default function SimPanel({ globalLLM, onArtifact, onFocusChange, isActive = true }) {
   const defaultGoal = "";
 
   const [goal, setGoal]         = useState(defaultGoal);
@@ -121,8 +121,9 @@ export default function SimPanel({ globalLLM, onArtifact, onFocusChange }) {
   }, [messages]);
 
   useEffect(() => {
+    if (!isActive) return;
     onFocusChange?.(buildFocusLabel(goal));
-  }, [goal, onFocusChange]);
+  }, [goal, onFocusChange, isActive]);
 
   const addMsg = useCallback((agent, text, type = "normal") => {
     setMessages(p => [...p, { id: Date.now() + Math.random(), agent, text, type, streaming: false }]);
@@ -233,8 +234,8 @@ export default function SimPanel({ globalLLM, onArtifact, onFocusChange }) {
       contextNotes,
       sampleSteps: parseInt(sampleSteps) || 200,
       outputRoot,
-      designer: { provider: designer.provider, url: designer.url, model: designer.model, apiKey: designer.apiKey || null, enabled: true },
-      analyst:  { provider: analyst.provider,  url: analyst.url,  model: analyst.model,  apiKey: analyst.apiKey  || null, enabled: true },
+      designer: { provider: designer.provider, url: designer.url, model: designer.model, apiKey: designer.apiKey || null, timeoutSeconds: 120, enabled: true },
+      analyst:  { provider: analyst.provider,  url: analyst.url,  model: analyst.model,  apiKey: analyst.apiKey  || null, timeoutSeconds: 120, enabled: true },
     };
 
     try {

@@ -946,7 +946,6 @@ class ResearchOrchestrator:
             answer = backend.complete(
                 system=_QUERY_SYSTEM,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
             )
             return answer.strip()
         except Exception as exc:
@@ -1010,7 +1009,6 @@ class ResearchOrchestrator:
             return backend.complete(
                 system=_SAMPLE_REVIEW_SYSTEM,
                 messages=[{"role": "user", "content": context}],
-                max_tokens=400,
             ).strip()
         except Exception as exc:
             log.warning(f"LLM sample review failed: {exc}")

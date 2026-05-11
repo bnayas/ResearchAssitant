@@ -22,6 +22,8 @@ class ScopeConstraint:
     exclude_topics: list[str] = field(default_factory=list)
     year_min: Optional[int] = None
     year_max: Optional[int] = None
+    anchor_year: Optional[int] = None
+    required_authors: list[str] = field(default_factory=list)
     arxiv_categories: list[str] = field(default_factory=list)
     max_papers: int = 30
 
@@ -122,7 +124,7 @@ class LiteratureReviewArtifact:
 class StreamEvent:
     event_type: Literal[
         "search_round_start", "title_found", "scope_removed",
-        "round_summary", "search_exhausted", "synthesis_start", "done",
+        "round_summary", "keyword_refined", "search_exhausted", "synthesis_start", "done",
     ]
     payload: dict
     timestamp: float = field(default_factory=time.time)

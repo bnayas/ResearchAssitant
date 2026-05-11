@@ -397,7 +397,6 @@ class RunAnalyst:
             raw = self._backend.complete(
                 system=self._system,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2048,
             )
             m_json = re.search(r"\{.*\}", raw, re.DOTALL)
             data = json.loads(m_json.group()) if m_json else {}
